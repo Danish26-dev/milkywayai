@@ -25,6 +25,20 @@ export type SupplyChainEventType =
   | 'RECEIVED'
   | string; // Extensible
 
+/**
+ * Canonical supply-chain event types accepted by the ingestion boundary.
+ * The journal ingestion API validates event_type against exactly this list;
+ * no new/incompatible event types may be introduced by clients.
+ */
+export const CANONICAL_EVENT_TYPES = [
+  'MILK_COLLECTED',
+  'TRANSFERRED',
+  'PROCESSED',
+  'STORED',
+  'DISPATCHED',
+  'RECEIVED'
+] as const;
+
 export interface BigQueryEvent {
   event_id: string;
   batch_id: string;

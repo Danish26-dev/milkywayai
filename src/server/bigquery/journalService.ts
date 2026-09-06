@@ -318,6 +318,64 @@ export class BigQueryJournalService {
   }
 
   /**
+   * Registers a NEW batch in the append-only journal (used by the supply-journal
+   * ingestion boundary). Never overwrites an existing batch id. Parameterized/validated.
+   * Returns the existing batch unchanged if the id already exists (idempotent register).
+   */
+  public async registerBatch(input: {
+    batch_id: string;
+    origin_facility_id: string;
+    initial_quantity_litres: number;
+    created_at?: string;
+    status?: string;
+  }): Promise<{ batch: BigQueryBatch; created: boolean }> {
+    const batchId = this.assertValidId(input.batch_id, 'batch_id');
+    const originFacilityId = this.assertValidId(input.origin_facility_id, 'origin_facility_id');
+
+    if (
+      typeof input.initial_quantity_litres !== 'number' ||
+      isNaN(input.initial_quantity_litres) ||
+      input.initial_quantity_litres <= 0
+    ) {
+      throw new Error('Invalid initial_quantity_litres: Must be a positive number');
+    }
+
+    // Never overwrite an existing batch — append-only semantics.
+    const existing = this.journalData.batches.find(b => b.batch_id === batchId);
+    if (existing) {
+      return { batch: existing, created: false };
+    }
+
+    const batch: BigQueryBatch = {
+      batch_id: batchId,
+      origin_facility_id: originFacilityId,
+      initial_quantity_litres: input.initial_quantity_litres,
+      created_at: input.created_at || new Date().toISOString(),
+      status: input.status || 'IN_TRANSIT'
+    };
+
+    if (this.isConnectedToLiveBigQuery && this.bqClient) {
+      try {
+        await this.bqClient.dataset(this.datasetId).table('batches').insert([batch]);
+        console.log(`[BigQuery Journal] Registered batch ${batchId} into ${this.datasetId}.batches`);
+      } catch (err: any) {
+        console.warn('[BigQuery Journal] Streaming insert of batch to live BigQuery failed:', err.message);
+      }
+    }
+
+    this.journalData.batches.push(batch);
+    return { batch, created: true };
+  }
+
+  /** Returns true if a batch id already exists in the journal. */
+  public async batchExists(rawBatchId: string): Promise<boolean> {
+    const batchId = this.assertValidId(rawBatchId, 'batch_id');
+    if (this.journalData.batches.some(b => b.batch_id === batchId)) return true;
+    const record = await this.getBatchById(batchId).catch(() => null);
+    return record !== null;
+  }
+
+  /**
    * GET /api/facilities
    */
   public async getFacilities(): Promise<BigQueryFacility[]> {

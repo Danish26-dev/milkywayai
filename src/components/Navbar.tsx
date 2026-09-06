@@ -76,6 +76,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenOfficerPortal, onNavigateS
           >
             Security & Trust
           </Link>
+          <Link
+            to="/journal"
+            className="text-xs font-semibold text-[#26352D] hover:text-[#202521] tracking-tight transition-all py-1"
+          >
+            Supply Journal
+          </Link>
           {navLinks.map((link) => (
             <button
               key={link.id}
@@ -126,6 +132,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenOfficerPortal, onNavigateS
             className="block py-2 px-3 text-sm font-medium text-[#202521] rounded-xl hover:bg-[#D8D3C7]/40"
           >
             How It Works
+          </Link>
+          <Link
+            to="/journal"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block py-2 px-3 text-sm font-medium text-[#202521] rounded-xl hover:bg-[#D8D3C7]/40"
+          >
+            Milk Supply Journal
           </Link>
           <Link
             to="/security"

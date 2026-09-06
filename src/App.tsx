@@ -13,6 +13,7 @@ import { LandingPage } from './pages/public/LandingPage';
 import { HowItWorksPage } from './pages/public/HowItWorksPage';
 import { SecurityPage } from './pages/public/SecurityPage';
 import { LoginPage } from './pages/public/LoginPage';
+import { JournalPage } from './pages/public/JournalPage';
 
 // Authenticated Application Pages
 import { DashboardPage } from './pages/app/DashboardPage';
@@ -38,6 +39,8 @@ export default function App() {
           <Route path="/how-it-works" element={<HowItWorksPage />} />
           <Route path="/security" element={<SecurityPage />} />
           <Route path="/login" element={<LoginPage />} />
+          {/* Public farmer / collection-operator supply-journal data entry (no officer data) */}
+          <Route path="/journal" element={<JournalPage />} />
 
           {/* Authenticated Application Console Routes (Protected) */}
           <Route

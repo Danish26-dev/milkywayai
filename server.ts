@@ -11,6 +11,9 @@
  * 4. Zero hardcoded secrets.
  */
 
+// Load .env for LOCAL development (no-op in production where the platform provides env).
+// Never overrides variables already set in the real environment (e.g. Cloud Run).
+import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -24,6 +27,7 @@ import { investigationRouter, batchSearchHandler } from './src/server/investigat
 import { isDevAuthEnabled } from './src/server/config.ts';
 import { userService } from './src/server/userService.ts';
 import { alertService } from './src/server/alertService.ts';
+import { journalRouter } from './src/server/journalRouter.ts';
 
 // Note: file paths use process.cwd() (Cloud-Run-safe); no import.meta / __dirname needed.
 
@@ -758,6 +762,11 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to update alert status', details: err.message });
     }
   });
+
+  // 5c. Mount PUBLIC Supply-Journal Ingestion API (farmer/collection-operator data entry).
+  // Intentionally NOT behind officer auth and has NO access to officer cases/alerts/evidence.
+  // All writes are validated, server-stamped, append-only, and rate-limited.
+  app.use('/api/journal', journalRouter);
 
   // 6. Mount Model Context Protocol (MCP) Investigation Tool Server
   app.use(createMcpApp());
