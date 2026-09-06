@@ -63,86 +63,8 @@ JOURNAL  →  TRACE  →  DETECT  →  INVESTIGATE  →  INSPECT
 
 ## 🏗 System Architecture
 
-```mermaid
-flowchart TD
-    subgraph Field["🚚 Physical Supply Chain"]
-        A1[Dairy Farms /\nCollection Vats]
-        A2[Transport\nVehicles]
-        A3[Processing\nFacilities]
-        A4[Storage &\nDistribution]
-    end
+<img width="1536" height="1024" alt="milky way diagram" src="https://github.com/user-attachments/assets/720dc1a2-3e5f-4681-bea3-1dcfa386a193" />
 
-    subgraph Journal["📖 Milk Supply Journal — BigQuery"]
-        B1[(Batches)]
-        B2[(Events)]
-        B3[(Facilities)]
-        B4[(Vehicles)]
-    end
-
-    subgraph Detect["⚙️ Deterministic Anomaly Engine"]
-        C1{Mass Balance\nCheck}
-        C2{Impossible\nMovement Check}
-        C3[[Flagged Anomaly\nMASS_BALANCE /\nIMPOSSIBLE_MOVEMENT]]
-    end
-
-    subgraph Investigate["🤖 Gemini Investigation Agent — Google ADK"]
-        D0[Investigation Triggered]
-        D1[[trace_batch]]
-        D2[[get_facility_history]]
-        D3[[get_vehicle_history]]
-        D4[[get_related_batches]]
-        D5[Gemini Reasoning\nVertex AI + ADC]
-        D6[Investigation Brief]
-    end
-
-    subgraph Persist["🗂 Investigation Journal — Firestore"]
-        E1[(Cases)]
-        E2[(Officer Notes)]
-        E3[(Conversation Summary)]
-    end
-
-    subgraph Officer["👮 Officer Console"]
-        F1[Review Brief]
-        F2[Ask Follow-up\nQuestions]
-        F3[Decide: Inspect /\nDismiss / Escalate]
-    end
-
-    A1 --> A2 --> A3 --> A4
-    A1 -. events .-> B2
-    A2 -. events .-> B2
-    A3 -. events .-> B2
-    A4 -. events .-> B2
-    B2 --> B1
-    B2 --> B3
-    B2 --> B4
-
-    B1 --> C1
-    B2 --> C2
-    C1 -->|discrepancy found| C3
-    C2 -->|threshold exceeded| C3
-
-    C3 --> D0
-    D0 --> D1 --> D5
-    D0 --> D2 --> D5
-    D0 --> D3 --> D5
-    D0 --> D4 --> D5
-    B1 -.read-only evidence.-> D1
-    B3 -.read-only evidence.-> D2
-    B4 -.read-only evidence.-> D3
-    D5 --> D6
-
-    D6 --> E1
-    E1 --> E2
-    E1 --> E3
-
-    E1 --> F1
-    F1 --> F2 --> D0
-    F1 --> F3
-
-    style C3 fill:#ffdddd,stroke:#d33,stroke-width:2px
-    style D6 fill:#e8f0fe,stroke:#4285F4,stroke-width:2px
-    style F3 fill:#e6f4ea,stroke:#34A853,stroke-width:2px
-```
 
 **Key design principle:** the AI never invents an anomaly and never touches the supply-chain database directly. It only *reasons over evidence retrieved through read-only MCP tools*, after a deterministic engine has already flagged a discrepancy.
 
