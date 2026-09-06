@@ -13,16 +13,32 @@ import { Router, Response } from 'express';
 import { caseService, CaseStatus } from './caseService';
 import { bigQueryJournalService } from './bigquery/journalService';
 import { milkyWayInvestigationAgent } from './agent/investigationAgent';
+import { officerNoteService } from './officerNoteService';
+import { chatSummaryService } from './chatSummaryService';
 
 export const investigationRouter = Router();
 
+// This router is always mounted behind authenticateFirebaseToken + requireRole,
+// so req.user is guaranteed present. We never fall back to a fabricated identity.
+function authCtx(req: any): { uid: string; isAdmin: boolean; role: string; displayName?: string; badge?: string } {
+  const uid = req.user?.uid;
+  return {
+    uid,
+    isAdmin: req.user?.role === 'ADMIN',
+    role: req.user?.role,
+    displayName: req.user?.displayName,
+    badge: req.user?.badgeNumber
+  };
+}
+
 /**
  * GET /api/investigations
- * Returns all investigation cases
+ * Returns only the cases the authenticated officer is authorized to see (ADMIN: all).
  */
 investigationRouter.get('/', async (req: any, res: Response) => {
   try {
-    const cases = await caseService.getAllCases();
+    const { uid, isAdmin } = authCtx(req);
+    const cases = await caseService.listCasesForOfficer(uid, isAdmin);
     res.json({ success: true, cases });
   } catch (err: any) {
     console.error('[InvestigationRouter] GET / failed:', err);
@@ -32,12 +48,12 @@ investigationRouter.get('/', async (req: any, res: Response) => {
 
 /**
  * GET /api/investigations/priority
- * Returns prioritized investigation cases tailored for the dashboard:
- * Columns: Priority, Batch, Facility, Anomaly, Discrepancy, Evidence Confidence, Status, Action
+ * Prioritized cases scoped to the authenticated officer (ADMIN: all).
  */
 investigationRouter.get('/priority', async (req: any, res: Response) => {
   try {
-    const priorityItems = await caseService.getPriorityInvestigations();
+    const { uid, isAdmin } = authCtx(req);
+    const priorityItems = await caseService.getPriorityInvestigations(uid, isAdmin);
     res.json({
       success: true,
       count: priorityItems.length,
@@ -53,20 +69,9 @@ investigationRouter.get('/priority', async (req: any, res: Response) => {
  * GET /api/investigations/:caseId
  * Returns full dossier for a specific investigation case
  */
-investigationRouter.get('/:caseId', async (req: any, res: Response) => {
-  try {
-    const { caseId } = req.params;
-    const c = await caseService.getCaseById(caseId);
-    if (!c) {
-      res.status(404).json({ error: `Investigation case not found: ${caseId}` });
-      return;
-    }
-    res.json({ success: true, case: c });
-  } catch (err: any) {
-    console.error('[InvestigationRouter] GET /:caseId failed:', err);
-    res.status(500).json({ error: 'Failed to fetch investigation case', details: err.message });
-  }
-});
+// NOTE: The GET '/:caseId' route is intentionally registered LAST (see bottom of file)
+// so that literal single-segment routes such as '/priority' and '/stream-investigate'
+// are matched before the dynamic ':caseId' parameter.
 
 /**
  * PATCH /api/investigations/:caseId/status
@@ -85,9 +90,18 @@ investigationRouter.patch('/:caseId/status', async (req: any, res: Response) => 
       return;
     }
 
-    const updated = await caseService.updateCaseStatus(caseId, status, req.user?.uid);
+    const { uid, isAdmin } = authCtx(req);
+    const updated = await caseService.updateCaseStatus(caseId, status, uid, isAdmin);
     res.json({ success: true, status: updated.status, case: updated });
   } catch (err: any) {
+    if (/FORBIDDEN/.test(err.message)) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (/not found/i.test(err.message)) {
+      res.status(404).json({ error: err.message });
+      return;
+    }
     console.error('[InvestigationRouter] PATCH /:caseId/status failed:', err);
     res.status(500).json({ error: 'Failed to update case status', details: err.message });
   }
@@ -100,25 +114,41 @@ investigationRouter.patch('/:caseId/status', async (req: any, res: Response) => 
 investigationRouter.post('/:caseId/notes', async (req: any, res: Response) => {
   try {
     const { caseId } = req.params;
-    const { noteText, actionTaken } = req.body || {};
+    const { noteText, content } = req.body || {};
+    const text = (content || noteText || '').toString();
 
-    if (!noteText || typeof noteText !== 'string' || !noteText.trim()) {
-      res.status(400).json({ error: 'noteText is required' });
+    if (!text.trim()) {
+      res.status(400).json({ error: 'content (note text) is required' });
       return;
     }
 
-    const note = await caseService.addOfficerNote(caseId, {
-      officerId: req.user?.uid || 'off-delhi-042',
-      officerBadge: req.user?.badgeNumber || 'FSO-IND-9021',
-      officerName: req.user?.displayName || 'P. Verma',
-      noteText: noteText.trim(),
-      actionTaken: actionTaken || 'INTERNAL_REVIEW'
-    });
-
-    res.json({ success: true, note });
+    const { uid, isAdmin } = authCtx(req);
+    // authorUid is taken from the verified token inside the service — never from the body.
+    const note = await officerNoteService.createNote({ caseId, authUid: uid, isAdmin, content: text });
+    res.status(201).json({ success: true, note });
   } catch (err: any) {
+    if (/FORBIDDEN/.test(err.message)) { res.status(403).json({ error: err.message }); return; }
+    if (/NOT_FOUND/.test(err.message)) { res.status(404).json({ error: err.message }); return; }
     console.error('[InvestigationRouter] POST /:caseId/notes failed:', err);
     res.status(500).json({ error: 'Failed to add officer note', details: err.message });
+  }
+});
+
+/**
+ * GET /api/investigations/:caseId/notes
+ * Lists officer notes for an authorized case.
+ */
+investigationRouter.get('/:caseId/notes', async (req: any, res: Response) => {
+  try {
+    const { caseId } = req.params;
+    const { uid, isAdmin } = authCtx(req);
+    const notes = await officerNoteService.listNotes({ caseId, authUid: uid, isAdmin });
+    res.json({ success: true, notes });
+  } catch (err: any) {
+    if (/FORBIDDEN/.test(err.message)) { res.status(403).json({ error: err.message }); return; }
+    if (/NOT_FOUND/.test(err.message)) { res.status(404).json({ error: err.message }); return; }
+    console.error('[InvestigationRouter] GET /:caseId/notes failed:', err);
+    res.status(500).json({ error: 'Failed to list officer notes', details: err.message });
   }
 });
 
@@ -136,26 +166,31 @@ investigationRouter.post('/:caseId/chat', async (req: any, res: Response) => {
       return;
     }
 
-    const c = await caseService.getCaseById(caseId);
+    const { uid, isAdmin } = authCtx(req);
+    const { case: c, forbidden } = await caseService.getCaseForOfficer(caseId, uid, isAdmin);
+    if (forbidden) {
+      res.status(403).json({ error: 'Forbidden: You are not authorized to chat on this case.' });
+      return;
+    }
     if (!c) {
       res.status(404).json({ error: `Case not found: ${caseId}` });
       return;
     }
 
-    // Record officer message
+    // Record officer message (multi-turn context preserved on the case)
     await caseService.addChatMessage(c.id, 'user', message.trim());
 
-    // Prepare contextual session for agent
+    // The agent session is keyed by case so the multi-turn conversation is preserved.
+    // The browser never calls Gemini directly; this authenticated backend does.
     const sessionId = `case-${c.id}`;
     const contextualMessage = `[Case Context: Batch ${c.batchCode}, Facility ${c.facilityName}, Anomaly: ${c.primaryAnomaly}, Discrepancy: ${c.discrepancyDescription}]\nOfficer inquiry: ${message.trim()}`;
 
     const agentResult = await milkyWayInvestigationAgent.processMessage(
       sessionId,
       contextualMessage,
-      req.user?.uid || 'FSO-OFFICER-01'
+      uid // verified token UID, never client-supplied
     );
 
-    // Record agent response
     const agentMsg = await caseService.addChatMessage(
       c.id,
       'assistant',
@@ -163,14 +198,43 @@ investigationRouter.post('/:caseId/chat', async (req: any, res: Response) => {
       agentResult.toolCalls
     );
 
+    // Checkpoint: attempt to (re)generate the conversation summary from the REAL
+    // conversation. If the AI layer is unavailable, no summary is created (returns null).
+    let summary = null;
+    try {
+      summary = await chatSummaryService.upsertSummaryForCase({ caseId: c.id, authUid: uid, isAdmin });
+    } catch (sErr) {
+      // summarization is best-effort; never blocks the chat turn
+    }
+
     res.json({
       success: true,
+      status: agentResult.status,
       message: agentMsg,
-      toolCalls: agentResult.toolCalls
+      toolCalls: agentResult.toolCalls,
+      summaryUpdated: summary !== null
     });
   } catch (err: any) {
     console.error('[InvestigationRouter] POST /:caseId/chat failed:', err);
     res.status(500).json({ error: 'Failed to process investigation chat', details: err.message });
+  }
+});
+
+/**
+ * GET /api/investigations/:caseId/summary
+ * Returns the case's chat summary if the caller is authorized.
+ */
+investigationRouter.get('/:caseId/summary', async (req: any, res: Response) => {
+  try {
+    const { caseId } = req.params;
+    const { uid, isAdmin } = authCtx(req);
+    const summary = await chatSummaryService.getSummaryForCase({ caseId, authUid: uid, isAdmin });
+    res.json({ success: true, summary });
+  } catch (err: any) {
+    if (/FORBIDDEN/.test(err.message)) { res.status(403).json({ error: err.message }); return; }
+    if (/NOT_FOUND/.test(err.message)) { res.status(404).json({ error: err.message }); return; }
+    console.error('[InvestigationRouter] GET /:caseId/summary failed:', err);
+    res.status(500).json({ error: 'Failed to fetch summary', details: err.message });
   }
 });
 
@@ -186,7 +250,7 @@ investigationRouter.post('/execute', async (req: any, res: Response) => {
       return;
     }
 
-    const officerId = req.user?.uid || 'FSO-OFFICER-01';
+    const officerId = req.user!.uid; // verified token UID; router is behind auth
     const caseRecord = await caseService.executeInvestigation(batchId, officerId);
 
     res.json({
@@ -210,7 +274,7 @@ investigationRouter.post('/execute', async (req: any, res: Response) => {
  */
 investigationRouter.get('/stream-investigate', async (req: any, res: Response) => {
   const batchId = (req.query.batchId as string) || 'MW-10482';
-  const officerId = req.user?.uid || 'FSO-OFFICER-01';
+  const officerId = req.user!.uid; // verified token UID; router is behind auth
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -263,7 +327,12 @@ investigationRouter.get('/stream-investigate', async (req: any, res: Response) =
  * - Anomalies
  * - Associated case
  */
-investigationRouter.get('/batches/search', async (req: any, res: Response) => {
+/**
+ * Batch search handler.
+ * Exported so it can be registered exactly once in server.ts at GET /api/batches/search,
+ * BEFORE the /api/batches/:batchId route, so "search" is never parsed as a batch id.
+ */
+export async function batchSearchHandler(req: any, res: Response): Promise<void> {
   try {
     const query = (req.query.q as string || '').trim().toUpperCase();
     if (!query) {
@@ -357,7 +426,32 @@ investigationRouter.get('/batches/search', async (req: any, res: Response) => {
       }
     });
   } catch (err: any) {
-    console.error('[InvestigationRouter] GET /batches/search failed:', err);
+    console.error('[InvestigationRouter] batchSearchHandler failed:', err);
     res.status(500).json({ error: 'Failed to search batch', details: err.message });
+  }
+}
+
+/**
+ * GET /api/investigations/:caseId
+ * Returns full dossier for a specific investigation case.
+ * Registered LAST so literal routes (/priority, /stream-investigate) match first.
+ */
+investigationRouter.get('/:caseId', async (req: any, res: Response) => {
+  try {
+    const { caseId } = req.params;
+    const { uid, isAdmin } = authCtx(req);
+    const { case: c, forbidden } = await caseService.getCaseForOfficer(caseId, uid, isAdmin);
+    if (forbidden) {
+      res.status(403).json({ error: 'Forbidden: You are not authorized to view this investigation case.' });
+      return;
+    }
+    if (!c) {
+      res.status(404).json({ error: `Investigation case not found: ${caseId}` });
+      return;
+    }
+    res.json({ success: true, case: c });
+  } catch (err: any) {
+    console.error('[InvestigationRouter] GET /:caseId failed:', err);
+    res.status(500).json({ error: 'Failed to fetch investigation case', details: err.message });
   }
 });

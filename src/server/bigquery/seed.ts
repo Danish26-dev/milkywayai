@@ -464,7 +464,7 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
         expected_quantity_litres: 980.0, // Expected: 980 L
         unaccounted_discrepancy_litres: 330.0, // Unaccounted: 330 L
         discrepancy_percentage: -33.67,
-        anomaly_flag: 'FLAG_MASS_BALANCE_EXCESSIVE_LOSS',
+        anomaly_flag: 'FLAG_MASS_BALANCE',
         destination_facility: 'FAC-AHMD-04',
         tanker_seal_no: 'SEAL-DISP-8802'
       }),
@@ -583,7 +583,7 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
         expected_quantity_litres: 980.0,
         unaccounted_discrepancy_litres: 330.0,
         discrepancy_percentage: -33.67,
-        anomaly_flag: 'FLAG_MASS_BALANCE_EXCESSIVE_LOSS',
+        anomaly_flag: 'FLAG_MASS_BALANCE',
         destination_facility: 'FAC-AHMD-04',
         tanker_seal_no: 'SEAL-DISP-8802'
       }),
@@ -615,7 +615,7 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
     {
       anomaly_id: 'ANOM-DEMO-MB-330L',
       batch_id: 'BATCH-DEMO-003-ANOMALOUS',
-      anomaly_type: 'MASS_BALANCE_EXCESSIVE_LOSS',
+      anomaly_type: 'MASS_BALANCE',
       severity: 'CRITICAL',
       observed_value: 650.0,
       expected_value: 980.0,
@@ -627,7 +627,7 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
     {
       anomaly_id: 'ANOM-MW-10482-MB',
       batch_id: 'MW-10482',
-      anomaly_type: 'MASS_BALANCE_EXCESSIVE_LOSS',
+      anomaly_type: 'MASS_BALANCE',
       severity: 'CRITICAL',
       observed_value: 650.0,
       expected_value: 980.0,

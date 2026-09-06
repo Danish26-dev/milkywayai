@@ -63,7 +63,8 @@ export interface BigQueryVehicle {
 export interface BigQueryAnomaly {
   anomaly_id: string;
   batch_id: string;
-  anomaly_type: 'MASS_BALANCE_EXCESSIVE_LOSS' | 'MASS_BALANCE_SURPLUS' | 'VELOCITY_IMPOSSIBILITY' | 'TEMPERATURE_EXCURSION' | string;
+  // Canonical MVP anomaly types only: MASS_BALANCE | IMPOSSIBLE_MOVEMENT
+  anomaly_type: 'MASS_BALANCE' | 'IMPOSSIBLE_MOVEMENT';
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   observed_value: number;
   expected_value: number;

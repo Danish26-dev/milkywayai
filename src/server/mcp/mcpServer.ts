@@ -30,6 +30,7 @@ import {
   withTimeout,
   McpInvestigationError
 } from './investigationTools';
+import { isDevAuthEnabled } from '../config';
 
 export interface McpCallerContext {
   callerId: string;
@@ -95,48 +96,28 @@ export async function authenticateMcpCaller(
     return;
   }
 
-  // 3. Test Harness Mock Tokens (Only permitted in non-production or test runs)
-  if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_TEST_TOKENS === 'true') {
-    if (token === 'TEST_OFFICER_TOKEN_VALID') {
-      req.mcpCaller = {
-        callerId: 'test-officer-9021',
-        role: 'OFFICER',
-        authMethod: 'TEST_HARNESS'
-      };
+  // 3. Development-only auth tokens.
+  // GUARANTEED disabled in production: isDevAuthEnabled() requires
+  // NODE_ENV !== 'production' AND ENABLE_DEV_AUTH === 'true'.
+  if (isDevAuthEnabled()) {
+    if (token === 'dev-officer') {
+      req.mcpCaller = { callerId: 'seed-officer-01', role: 'OFFICER', authMethod: 'TEST_HARNESS' };
       return next();
     }
-    if (token === 'TEST_ADMIN_TOKEN_VALID') {
-      req.mcpCaller = {
-        callerId: 'test-admin-01',
-        role: 'ADMIN',
-        authMethod: 'TEST_HARNESS'
-      };
+    if (token === 'dev-admin') {
+      req.mcpCaller = { callerId: 'seed-admin-01', role: 'ADMIN', authMethod: 'TEST_HARNESS' };
       return next();
-    }
-    if (token === 'TEST_FARMER_TOKEN') {
-      // Explicitly reject farmer identity: farmer identities must never satisfy officer MCP tools
-      res.status(403).json({
-        success: false,
-        tool: req.path.split('/').pop() || 'unknown',
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Unauthorized request: Role FARMER is not authorized to invoke MilkyWay officer MCP tools.'
-        },
-        executed_at: new Date().toISOString(),
-        duration_ms: 0
-      });
-      return;
     }
   }
 
-  // 4. Verify Firebase ID Token via Firebase Admin SDK
+  // 4. Verify Firebase ID Token via Firebase Admin SDK.
+  // Authorization is claim-based only. Email text NEVER grants access.
   try {
     const decodedToken = await getAuth().verifyIdToken(token);
     const roleClaim = (decodedToken.role as string)?.toUpperCase();
-    const email = (decodedToken.email || '').toLowerCase();
 
-    const isOfficer = roleClaim === 'OFFICER' || roleClaim === 'ADMIN' || email.includes('foodsafety.gov.in') || email.includes('officer');
-    
+    const isOfficer = roleClaim === 'OFFICER' || roleClaim === 'ADMIN';
+
     if (!isOfficer) {
       res.status(403).json({
         success: false,
@@ -163,8 +144,7 @@ export async function authenticateMcpCaller(
       tool: req.path.split('/').pop() || 'unknown',
       error: {
         code: 'UNAUTHORIZED',
-        message: 'Unauthorized request: Firebase token verification failed.',
-        details: err.message
+        message: 'Unauthorized request: Firebase token verification failed.'
       },
       executed_at: new Date().toISOString(),
       duration_ms: 0

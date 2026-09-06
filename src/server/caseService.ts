@@ -18,6 +18,7 @@ import { bigQueryJournalService } from './bigquery/journalService';
 import { deterministicAnomalyEngine } from './anomalyEngine';
 import { mcpClient } from './agent/mcpClient';
 import { milkyWayInvestigationAgent, MANDATORY_DISCLAIMER } from './agent/investigationAgent';
+import { GEMINI_MODEL } from './config';
 
 export type CaseStatus = 'OPEN' | 'UNDER_REVIEW' | 'INSPECTION_REQUIRED' | 'RESOLVED';
 export type CasePriority = 'IMMEDIATE' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -58,17 +59,21 @@ export interface SupportingEvidenceItem {
 }
 
 export interface InvestigationBriefData {
+  // Status reflects whether the AI reasoning layer produced this brief.
+  // When 'AI_UNAVAILABLE', the brief carries deterministic evidence only and no AI narrative.
+  status: 'OK' | 'AI_UNAVAILABLE';
   summary: string;
   primaryAnomaly: string;
+  observedValue: number | null;
+  expectedValue: number | null;
+  difference: number | null;
   observedDetails: string;
   discrepancyAnalysis: string;
   evidenceConfidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  recommendedAction: string;
-  hypothesesForFieldInspector: string[];
+  recommendedAction: 'INSPECT_NOW' | 'MONITOR' | 'NO_ACTION';
   recommendedInspectionFocus: {
     facilityId: string;
     facilityName: string;
-    specificChecklist: string[];
     urgency: 'IMMEDIATE' | 'NEXT_SHIFT' | 'ROUTINE';
   };
   nonDiagnosticDisclaimer: string;
@@ -81,6 +86,10 @@ export interface FullInvestigationCase {
   caseNumber: string;
   batchId: string;
   batchCode: string;
+  // Ownership fields for authorization (also enforced by Firestore rules).
+  // assignedOfficerUid is ALWAYS set server-side from the verified token.
+  assignedOfficerUid: string;
+  sharedWithUids: string[];
   facilityId: string;
   facilityName: string;
   primaryAnomaly: string;
@@ -176,10 +185,13 @@ export class CaseService {
       caseNumber: 'INV-MW-10482',
       batchId: 'MW-10482',
       batchCode: 'MW-10482',
+      // Seed case belongs to the demo officer account.
+      assignedOfficerUid: 'seed-officer-01',
+      sharedWithUids: [],
       facilityId: 'FAC-AMUL-03',
       facilityName: 'Amul Western Processing Mega-Plant',
       primaryAnomaly: 'UNACCOUNTED QUANTITY',
-      primaryAnomalyType: 'MASS_BALANCE_EXCESSIVE_LOSS',
+      primaryAnomalyType: 'MASS_BALANCE',
       severity: 'CRITICAL',
       priority: 'IMMEDIATE',
       evidenceConfidence: 0.98,
@@ -302,31 +314,24 @@ export class CaseService {
         ]
       },
       brief: {
-        summary: 'Investigation of batch MW-10482 identified a severe deterministic mass-balance shortfall of 330.0 L (-33.67% variance) during HTST pasteurization and discharge at Amul Western Processing Mega-Plant.',
-        primaryAnomaly: 'Mass balance discrepancy (-330 L shortfall)',
-        observedDetails: 'Initial intake of 1,000.0 L raw milk collected at Anand facility resulted in expected pasteurized volume of 980.0 L. Actual recorded dispatch volume was 650.0 L.',
-        discrepancyAnalysis: 'Deterministic mass-balance rule triggered: Expected output 980.0 L, actual output 650.0 L. Difference is -330.0 L (-33.67%), heavily exceeding allowable process threshold of ±2.0%.',
+        status: 'OK',
+        summary: 'Batch MW-10482 shows a deterministic mass-balance discrepancy of 330 L between expected processing output (980 L) and recorded dispatch (650 L) at Amul Western Processing Mega-Plant.',
+        primaryAnomaly: 'MASS_BALANCE',
+        observedValue: 650,
+        expectedValue: 980,
+        difference: -330,
+        observedDetails: 'Intake 1,000 L at Anand; expected pasteurized output 980 L; recorded dispatch 650 L.',
+        discrepancyAnalysis: 'Deterministic mass-balance rule: expected output 980 L, recorded output 650 L, difference -330 L (-33.67%), exceeding the configured ±2.0% tolerance. This is an unexplained supply-chain discrepancy requiring physical verification.',
         evidenceConfidence: 'HIGH',
-        recommendedAction: 'Prioritize physical inspection and flow-meter audit at Amul Western Processing Mega-Plant.',
-        hypothesesForFieldInspector: [
-          'Unrecorded diversion or unauthorized offload from vat #3 prior to packaging line discharge.',
-          'Severe mechanical leakage or seal blowout within pasteurization heating jacket PAST-MEGA-UNIT-01.',
-          'Flow meter calibration drift or sensor malfunction on discharge meter FM-DISP-PACK-04.'
-        ],
+        recommendedAction: 'INSPECT_NOW',
         recommendedInspectionFocus: {
           facilityId: 'FAC-AMUL-03',
           facilityName: 'Amul Western Processing Mega-Plant',
-          specificChecklist: [
-            'Audit calibration certificates and calibration seals on flowmeter FM-DISP-PACK-04.',
-            'Inspect CIP (Clean-in-Place) drainage valves for unmetered diversion lines.',
-            'Review physical weighbridge gross/tare tickets for tanker VEH-GJ23-T9904.',
-            'Cross-examine operator shift handoff logs for pasteurizer unit PAST-MEGA-UNIT-01.'
-          ],
           urgency: 'IMMEDIATE'
         },
         nonDiagnosticDisclaimer: MANDATORY_DISCLAIMER,
         generatedAt: '2026-09-05T14:00:00.000Z',
-        agentVersion: 'ADK-MilkyWay-v2.6'
+        agentVersion: 'MilkyWay-Agent (seed)'
       },
       officerNotes: [
         {
@@ -361,72 +366,12 @@ export class CaseService {
     this.inMemoryCases.set(mwCase.id, mwCase);
     this.inMemoryCases.set(mwCase.batchId, mwCase);
 
-    // Seed additional priority cases
-    const case0901: FullInvestigationCase = {
-      id: 'CASE-2026-0901',
-      caseNumber: 'INV-2026-0901',
-      batchId: 'BATCH-2026-0901',
-      batchCode: 'MW-0901',
-      facilityId: 'FAC-CHILL-NORTH-04',
-      facilityName: 'Kaira Regional Chilling Hub #4',
-      primaryAnomaly: 'UNACCOUNTED QUANTITY',
-      primaryAnomalyType: 'MASS_BALANCE_SURPLUS',
-      severity: 'CRITICAL',
-      priority: 'IMMEDIATE',
-      evidenceConfidence: 0.96,
-      evidenceConfidenceLabel: 'HIGH',
-      status: 'UNDER_REVIEW',
-      discrepancyLitres: 1420.0,
-      variancePercentage: 4.2,
-      discrepancyDescription: '+1,420 L Unaccounted Surplus (+4.2%)',
-      recommendedAction: 'Conduct unannounced audit of Kaira Chilling Hub vat silos 4 & 5 to verify intake receipts.',
-      timeline: [],
-      supportingEvidence: {
-        batch: [],
-        facility: [],
-        vehicle: [],
-        relatedBatches: []
-      },
-      officerNotes: [],
-      chatHistory: [],
-      createdAt: '2026-09-06T02:00:00.000Z',
-      updatedAt: '2026-09-06T02:00:00.000Z'
-    };
-    this.inMemoryCases.set(case0901.id, case0901);
-    this.inMemoryCases.set(case0901.batchId, case0901);
-
-    const case0894: FullInvestigationCase = {
-      id: 'CASE-2026-0894',
-      caseNumber: 'INV-2026-0894',
-      batchId: 'BATCH-2026-0894',
-      batchCode: 'MW-0894',
-      facilityId: 'FAC-TRANSIT-TRK-18',
-      facilityName: 'North Transit Corridor #18',
-      primaryAnomaly: 'IMPLAUSIBLE MOVEMENT',
-      primaryAnomalyType: 'VELOCITY_IMPOSSIBILITY',
-      severity: 'HIGH',
-      priority: 'HIGH',
-      evidenceConfidence: 0.94,
-      evidenceConfidenceLabel: 'HIGH',
-      status: 'OPEN',
-      discrepancyLitres: 0,
-      variancePercentage: 0,
-      discrepancyDescription: 'Transit time 32 min vs min physical 105 min (142 km/h)',
-      recommendedAction: 'Inspect GPS tracker tampering and odometer on tanker VEH-DL01-T9921.',
-      timeline: [],
-      supportingEvidence: {
-        batch: [],
-        facility: [],
-        vehicle: [],
-        relatedBatches: []
-      },
-      officerNotes: [],
-      chatHistory: [],
-      createdAt: '2026-09-05T20:00:00.000Z',
-      updatedAt: '2026-09-05T20:00:00.000Z'
-    };
-    this.inMemoryCases.set(case0894.id, case0894);
-    this.inMemoryCases.set(case0894.batchId, case0894);
+    // Canonical demo dataset: the only seeded case is CASE-MW-10482, which maps
+    // 1:1 to real BigQuery journal data (batch MW-10482, its events, anomaly
+    // ANOM-MW-10482-MB, facility FAC-AMUL-03, vehicle VEH-GJ23-T9904).
+    // Previous phantom cases (BATCH-2026-0901 / BATCH-2026-0894) referenced batches,
+    // facilities, and vehicles that do NOT exist in the journal and have been removed
+    // so every case is consistent with the append-only journal and investigable.
   }
 
   public async getAllCases(): Promise<FullInvestigationCase[]> {
@@ -453,7 +398,106 @@ export class CaseService {
     return Array.from(uniqueMap.values());
   }
 
-  public async getPriorityInvestigations(): Promise<Array<{
+  /**
+   * Server-side ownership check. ADMIN sees all; officers see cases assigned to them
+   * or explicitly shared with them. This mirrors the Firestore security rules.
+   */
+  public canAccessCase(c: FullInvestigationCase, uid: string, isAdmin: boolean): boolean {
+    if (isAdmin) return true;
+    if (c.assignedOfficerUid === uid) return true;
+    if (Array.isArray(c.sharedWithUids) && c.sharedWithUids.includes(uid)) return true;
+    return false;
+  }
+
+  /**
+   * Lists only the cases the authenticated officer is authorized to see.
+   */
+  public async listCasesForOfficer(uid: string, isAdmin: boolean): Promise<FullInvestigationCase[]> {
+    const all = await this.getAllCases();
+    return all.filter(c => this.canAccessCase(c, uid, isAdmin));
+  }
+
+  /**
+   * Fetches a case only if the authenticated officer is authorized. Returns
+   * { case: null, forbidden: true } when the case exists but access is denied,
+   * so callers can distinguish 403 from 404.
+   */
+  public async getCaseForOfficer(
+    caseId: string,
+    uid: string,
+    isAdmin: boolean
+  ): Promise<{ case: FullInvestigationCase | null; forbidden: boolean }> {
+    const c = await this.getCaseById(caseId);
+    if (!c) return { case: null, forbidden: false };
+    if (!this.canAccessCase(c, uid, isAdmin)) return { case: null, forbidden: true };
+    return { case: c, forbidden: false };
+  }
+
+  /**
+   * Creates a new case. assignedOfficerUid is ALWAYS the authenticated caller's UID,
+   * unless the caller is an ADMIN who explicitly assigns another officer.
+   * A client-supplied assignedOfficerUid is otherwise ignored.
+   */
+  public async createCase(params: {
+    authUid: string;
+    isAdmin: boolean;
+    batchId: string;
+    batchCode?: string;
+    facilityId?: string;
+    facilityName?: string;
+    requestedAssigneeUid?: string;
+    sharedWithUids?: string[];
+  }): Promise<FullInvestigationCase> {
+    const assignedOfficerUid =
+      params.isAdmin && params.requestedAssigneeUid ? params.requestedAssigneeUid : params.authUid;
+
+    const batchId = params.batchId.trim();
+    const now = new Date().toISOString();
+    const caseId = `CASE-${batchId}`;
+
+    const newCase: FullInvestigationCase = {
+      id: caseId,
+      caseNumber: `INV-${batchId}`,
+      batchId,
+      batchCode: params.batchCode || batchId,
+      assignedOfficerUid,
+      sharedWithUids: Array.isArray(params.sharedWithUids) ? params.sharedWithUids : [],
+      facilityId: params.facilityId || 'UNKNOWN',
+      facilityName: params.facilityName || 'Unknown Facility',
+      primaryAnomaly: 'PENDING INVESTIGATION',
+      primaryAnomalyType: 'NONE',
+      severity: 'LOW',
+      priority: 'LOW',
+      evidenceConfidence: 0.5,
+      evidenceConfidenceLabel: 'LOW',
+      status: 'OPEN',
+      discrepancyLitres: 0,
+      variancePercentage: 0,
+      discrepancyDescription: 'Not yet investigated',
+      recommendedAction: 'NO_ACTION',
+      timeline: [],
+      supportingEvidence: { batch: [], facility: [], vehicle: [], relatedBatches: [] },
+      officerNotes: [],
+      chatHistory: [],
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.inMemoryCases.set(newCase.id, newCase);
+    this.inMemoryCases.set(newCase.batchId, newCase);
+
+    const db = this.getFirestoreDb();
+    if (db) {
+      try {
+        await db.collection('cases').doc(newCase.id).set(sanitizeForFirestore(newCase), { merge: true });
+      } catch (err) {
+        console.warn('[CaseService] Firestore createCase failed; retained in memory.');
+      }
+    }
+    return newCase;
+  }
+
+  public async getPriorityInvestigations(uid?: string, isAdmin = false): Promise<Array<{
     priority: CasePriority;
     batch: string;
     batchId: string;
@@ -467,8 +511,12 @@ export class CaseService {
     action: string;
     caseId: string;
   }>> {
-    const allCases = await this.getAllCases();
-    
+    // Scope to the authenticated officer unless caller is ADMIN.
+    // If no uid is supplied (internal/legacy call), fall back to all cases.
+    const allCases = uid
+      ? await this.listCasesForOfficer(uid, isAdmin)
+      : await this.getAllCases();
+
     // Sort by priority rank: IMMEDIATE first, then HIGH, then MEDIUM, then LOW
     const priorityRank: Record<string, number> = {
       IMMEDIATE: 4,
@@ -529,10 +577,22 @@ export class CaseService {
     return null;
   }
 
-  public async updateCaseStatus(caseId: string, status: CaseStatus, officerId?: string): Promise<FullInvestigationCase> {
+  /**
+   * Updates case status with server-side ownership enforcement.
+   * Throws 'FORBIDDEN' if the caller is not authorized for this case.
+   */
+  public async updateCaseStatus(
+    caseId: string,
+    status: CaseStatus,
+    authUid: string,
+    isAdmin = false
+  ): Promise<FullInvestigationCase> {
     const c = await this.getCaseById(caseId);
     if (!c) {
       throw new Error(`Case not found: ${caseId}`);
+    }
+    if (!this.canAccessCase(c, authUid, isAdmin)) {
+      throw new Error('FORBIDDEN: You are not authorized to modify this case.');
     }
 
     c.status = status;
@@ -694,8 +754,8 @@ export class CaseService {
       relatedBatchesCount: allRelated.length
     });
 
-    // Step 5: Correlating evidence & generating structured brief via ADK Agent
-    onStep?.('Correlating evidence', 'running', { model: 'gemini-3.8-flash' });
+    // Step 5: Correlating evidence & generating structured brief via investigation agent
+    onStep?.('Correlating evidence', 'running', { model: GEMINI_MODEL });
     const sessionId = `inv-${cleanBatchId}-${Date.now()}`;
     const agentPrompt = `Investigate batch ${cleanBatchId}.`;
     const agentResponse = await milkyWayInvestigationAgent.processMessage(
@@ -703,7 +763,10 @@ export class CaseService {
       agentPrompt,
       officerId
     );
-    onStep?.('Correlating evidence', 'completed', { briefLength: agentResponse.message.length });
+    onStep?.('Correlating evidence', 'completed', {
+      status: agentResponse.status,
+      briefLength: agentResponse.message.length
+    });
 
     // Assemble supporting evidence grouped by categories
     const supportingEvidence = {
@@ -753,36 +816,55 @@ export class CaseService {
       }))
     };
 
-    const initialLitres = traceResult.quantities.initial_litres || traceResult.batch.initial_quantity_litres || 1000;
-    const finalLitres = traceResult.quantities.final_recorded_litres || initialLitres;
-    const discrepancyLitres = traceResult.quantities.net_variance_litres || (finalLitres - initialLitres);
+    // All values below are sourced from deterministic trace evidence, never fabricated.
+    const anomaly = traceResult.existing_anomalies[0] || null;
+    const initialLitres = traceResult.quantities.initial_litres || traceResult.batch.initial_quantity_litres || 0;
+    const finalLitres = traceResult.quantities.final_recorded_litres ?? initialLitres;
+    const discrepancyLitres = traceResult.quantities.net_variance_litres ?? (finalLitres - initialLitres);
 
-    // Construct structured investigation brief
+    // Prefer the agent's evidence-grounded structured brief. If the AI layer is
+    // unavailable, fall back to deterministic-engine values only — with NO fabricated
+    // hypotheses, checklists, or narrative claims.
+    const agentBrief = agentResponse.brief;
+    const severityUpper = (anomaly?.severity || '').toUpperCase();
+    const deterministicAction: InvestigationBriefData['recommendedAction'] = !anomaly
+      ? 'NO_ACTION'
+      : severityUpper === 'HIGH' || severityUpper === 'CRITICAL'
+        ? 'INSPECT_NOW'
+        : 'MONITOR';
+    const deterministicConfidence: InvestigationBriefData['evidenceConfidence'] =
+      !anomaly ? 'HIGH' : severityUpper === 'MEDIUM' ? 'MEDIUM' : severityUpper ? 'HIGH' : 'LOW';
+
+    const recommendedAction = agentBrief?.recommendedAction ?? deterministicAction;
+    const evidenceConfidenceLabel = agentBrief?.evidenceConfidence ?? deterministicConfidence;
+    const primaryAnomalyType = anomaly?.type || 'NONE';
+
     const briefData: InvestigationBriefData = {
-      summary: agentResponse.message.slice(0, 500),
-      primaryAnomaly: traceResult.existing_anomalies[0]?.type || 'UNACCOUNTED QUANTITY',
-      observedDetails: `Batch initial input: ${initialLitres} L. Recorded output: ${finalLitres} L. Discrepancy: ${discrepancyLitres} L.`,
-      discrepancyAnalysis: agentResponse.message,
-      evidenceConfidence: 'HIGH',
-      recommendedAction: 'Dispatch field inspection unit for flow-meter verification and physical vat inspection.',
-      hypothesesForFieldInspector: [
-        'Unrecorded diversion prior to packaging intake valve.',
-        'Flow meter mechanical slip or calibration inaccuracy on discharge line.',
-        'Seal integrity compromise or unmetered drain line loss.'
-      ],
+      status: agentResponse.status,
+      summary:
+        agentResponse.status === 'OK'
+          ? agentResponse.message.slice(0, 500)
+          : 'AI reasoning is temporarily unavailable. This brief contains deterministic anomaly-engine evidence only.',
+      primaryAnomaly: primaryAnomalyType,
+      observedValue: agentBrief?.observedValue ?? anomaly?.observed_value ?? null,
+      expectedValue: agentBrief?.expectedValue ?? anomaly?.expected_value ?? null,
+      difference: agentBrief?.difference ?? anomaly?.difference ?? (finalLitres - initialLitres),
+      observedDetails: `Batch initial input: ${initialLitres} L. Recorded output: ${finalLitres} L. Net variance: ${discrepancyLitres} L.`,
+      discrepancyAnalysis:
+        agentResponse.status === 'OK'
+          ? agentResponse.message
+          : agentBrief?.interpretation ||
+            `Deterministic evidence for batch ${cleanBatchId}: net variance ${discrepancyLitres} L across ${traceResult.event_timeline.length} recorded events.`,
+      evidenceConfidence: evidenceConfidenceLabel,
+      recommendedAction,
       recommendedInspectionFocus: {
         facilityId: primaryFacilityId,
         facilityName: facilityResult.facility.name,
-        specificChecklist: [
-          'Perform physical test re-weigh on next tanker batch.',
-          'Audit flow-meter sensor calibration logs for last 30 days.',
-          'Examine physical seals and CIP bypass piping.'
-        ],
-        urgency: 'IMMEDIATE'
+        urgency: recommendedAction === 'INSPECT_NOW' ? 'IMMEDIATE' : recommendedAction === 'MONITOR' ? 'NEXT_SHIFT' : 'ROUTINE'
       },
       nonDiagnosticDisclaimer: MANDATORY_DISCLAIMER,
       generatedAt: new Date().toISOString(),
-      agentVersion: 'ADK-MilkyWay-v2.6'
+      agentVersion: `MilkyWay-Agent (${GEMINI_MODEL})`
     };
 
     const caseId = `CASE-${cleanBatchId}`;
@@ -796,14 +878,17 @@ export class CaseService {
       caseNumber: caseNumber,
       batchId: cleanBatchId,
       batchCode: cleanBatchId,
+      // Preserve existing ownership; otherwise assign to the investigating officer (verified UID).
+      assignedOfficerUid: existingCase?.assignedOfficerUid || officerId,
+      sharedWithUids: existingCase?.sharedWithUids || [],
       facilityId: primaryFacilityId,
       facilityName: facilityResult.facility.name,
-      primaryAnomaly: 'UNACCOUNTED QUANTITY',
-      primaryAnomalyType: traceResult.existing_anomalies[0]?.type || 'MASS_BALANCE_EXCESSIVE_LOSS',
-      severity: (traceResult.existing_anomalies[0]?.severity as any) || 'CRITICAL',
-      priority: 'IMMEDIATE',
-      evidenceConfidence: 0.98,
-      evidenceConfidenceLabel: 'HIGH',
+      primaryAnomaly: anomaly ? (anomaly.type === 'IMPOSSIBLE_MOVEMENT' ? 'IMPLAUSIBLE MOVEMENT' : 'UNACCOUNTED QUANTITY') : 'NO ANOMALY DETECTED',
+      primaryAnomalyType: anomaly?.type || 'NONE',
+      severity: (anomaly?.severity as any) || 'LOW',
+      priority: recommendedAction === 'INSPECT_NOW' ? 'IMMEDIATE' : recommendedAction === 'MONITOR' ? 'MEDIUM' : 'LOW',
+      evidenceConfidence: evidenceConfidenceLabel === 'HIGH' ? 0.95 : evidenceConfidenceLabel === 'MEDIUM' ? 0.75 : 0.5,
+      evidenceConfidenceLabel,
       status: existingCase?.status || 'OPEN',
       discrepancyLitres: discrepancyLitres,
       variancePercentage: initialLitres > 0 ? (discrepancyLitres / initialLitres) * 100 : 0,

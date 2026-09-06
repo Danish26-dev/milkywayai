@@ -26,9 +26,10 @@ import {
 import { createMcpApp } from './mcpServer';
 import { bigQueryJournalService } from '../bigquery/journalService';
 
-// Ensure test tokens are enabled
+// Enable development-only auth tokens for this test run.
+// Requires BOTH: NODE_ENV !== 'production' AND ENABLE_DEV_AUTH === 'true'.
 process.env.NODE_ENV = 'test';
-process.env.ALLOW_TEST_TOKENS = 'true';
+process.env.ENABLE_DEV_AUTH = 'true';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -247,36 +248,36 @@ async function runMcpServerTestSuite() {
     assertEqual(noAuthJson.error?.code, 'UNAUTHORIZED', 'Error code must be UNAUTHORIZED');
     console.log('    ✔ Missing auth rejected with 401 UNAUTHORIZED.');
 
-    // 5.2 Untrusted / Farmer Role Token (403 Forbidden)
-    console.log('  Testing 5.2: Role Separation - Farmer token attempting officer MCP tool...');
-    const resFarmer = await fetch(`${baseUrl}/mcp/tools/trace_batch`, {
+    // 5.2 Unknown/invalid bearer token is rejected (not a recognized dev token, not a valid Firebase token)
+    console.log('  Testing 5.2: Unknown bearer token rejected...');
+    const resBadToken = await fetch(`${baseUrl}/mcp/tools/trace_batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer TEST_FARMER_TOKEN'
+        'Authorization': 'Bearer some-unrecognized-token'
       },
       body: JSON.stringify({ batch_id: 'BATCH-DEMO-001-CLEAN' })
     });
-    assertEqual(resFarmer.status, 403, 'Must return 403 when farmer role attempts officer tool');
-    const farmerJson = await resFarmer.json();
-    assertEqual(farmerJson.error?.code, 'UNAUTHORIZED', 'Error code must be UNAUTHORIZED');
-    console.log('    ✔ Farmer role strictly forbidden from officer MCP tools.');
+    assert(resBadToken.status === 401 || resBadToken.status === 403, 'Unknown token must be rejected (401/403)');
+    const badTokenJson = await resBadToken.json();
+    assertEqual(badTokenJson.error?.code, 'UNAUTHORIZED', 'Error code must be UNAUTHORIZED');
+    console.log('    ✔ Unknown token rejected as UNAUTHORIZED.');
 
-    // 5.3 Valid Officer Token (200 OK)
-    console.log('  Testing 5.3: Valid Officer token invocation...');
+    // 5.3 Valid dev Officer token (200 OK) — only accepted because ENABLE_DEV_AUTH=true and NODE_ENV!=production
+    console.log('  Testing 5.3: Valid dev-officer token invocation...');
     const resOfficer = await fetch(`${baseUrl}/mcp/tools/trace_batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer TEST_OFFICER_TOKEN_VALID'
+        'Authorization': 'Bearer dev-officer'
       },
       body: JSON.stringify({ batch_id: 'BATCH-DEMO-001-CLEAN' })
     });
-    assertEqual(resOfficer.status, 200, 'Must return 200 OK for verified Officer');
+    assertEqual(resOfficer.status, 200, 'Must return 200 OK for dev officer token');
     const officerJson = await resOfficer.json();
     assert(officerJson.success === true, 'Officer response must have success: true');
     assertEqual(officerJson.data?.batch?.batch_id, 'BATCH-DEMO-001-CLEAN', 'Payload must match batch');
-    console.log('    ✔ Verified Officer token successfully granted access.');
+    console.log('    ✔ dev-officer token granted access under ENABLE_DEV_AUTH.');
 
     // 5.4 JSON-RPC 2.0 tools/call via /mcp/rpc
     console.log('  Testing 5.4: Standard MCP JSON-RPC 2.0 tools/call execution...');
@@ -284,7 +285,7 @@ async function runMcpServerTestSuite() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer TEST_OFFICER_TOKEN_VALID'
+        'Authorization': 'Bearer dev-officer'
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -309,7 +310,7 @@ async function runMcpServerTestSuite() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer TEST_OFFICER_TOKEN_VALID'
+        'Authorization': 'Bearer dev-officer'
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -322,7 +323,7 @@ async function runMcpServerTestSuite() {
     console.log('    ✔ Exactly 4 investigation tools listed in MCP discovery manifest.');
 
   } finally {
-    server.close();
+    await new Promise<void>(resolve => server.close(() => resolve()));
   }
 
   // --------------------------------------------------------------------------

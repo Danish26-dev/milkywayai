@@ -12,6 +12,8 @@
 
 import { Router, Response } from 'express';
 import { milkyWayInvestigationAgent } from './investigationAgent';
+import { GEMINI_MODEL } from '../config';
+import { isGeminiConfigured, geminiAuthSummary } from '../geminiAuth';
 
 export const agentRouter = Router();
 
@@ -41,8 +43,10 @@ agentRouter.post('/chat', async (req: any, res: Response) => {
 
     res.json({
       success: true,
+      status: result.status,
       sessionId: effectiveSessionId,
       message: result.message,
+      brief: result.brief,
       toolCalls: result.toolCalls,
       session: {
         sessionId: result.session.sessionId,
@@ -88,9 +92,11 @@ agentRouter.post('/investigate', async (req: any, res: Response) => {
 
     res.json({
       success: true,
+      status: result.status,
       batchId: cleanBatchId,
       sessionId: effectiveSessionId,
-      brief: result.message,
+      message: result.message,
+      brief: result.brief,
       toolCalls: result.toolCalls,
       session: {
         sessionId: result.session.sessionId,
@@ -135,19 +141,24 @@ agentRouter.get('/session/:sessionId', (req: any, res: Response) => {
  * Reports agent readiness and MCP integration state
  */
 agentRouter.get('/status', (req: any, res: Response) => {
-  const hasKey = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
+  const configured = isGeminiConfigured();
+  const auth = geminiAuthSummary(); // non-sensitive: mode/vertex/project/location only
   res.json({
     status: 'ready',
     agent: 'MilkyWay Investigation Agent',
-    framework: 'Google ADK & Gemini',
-    gemini_api_configured: hasKey,
+    framework: auth.vertex ? 'Google Gemini via Vertex AI (ADC)' : 'Google Gemini',
+    gemini_configured: configured,
+    ai_reasoning_available: configured,
+    gemini_model: GEMINI_MODEL,
+    gemini_auth_mode: auth.mode, // 'vertex' | 'apikey' | 'none' — never the credential itself
+    vertex_project: auth.project,
+    vertex_location: auth.location,
     mcp_tools_connected: [
       'trace_batch',
       'get_facility_history',
       'get_vehicle_history',
       'get_related_batches'
     ],
-    non_diagnostic_guardrails: 'ACTIVE',
-    fallback_ladder: ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.7-flash']
+    non_diagnostic_guardrails: 'ACTIVE'
   });
 });

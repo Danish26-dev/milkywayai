@@ -470,7 +470,7 @@ export async function getVehicleHistory(args: GetVehicleHistoryArgs): Promise<Ge
     // 4. Movement anomalies
     const movementAnomalies = allAnomalies
       .filter(a => a.type === 'IMPOSSIBLE_MOVEMENT' && (
-        batchesCarriedMap.has(a.batch_id) || a.supporting_events.some(se => vehicleEvents.some(ve => ve.event_id === se))
+        batchesCarriedMap.has(a.batch_id) || (a.supporting_events || []).some(se => vehicleEvents.some(ve => ve.event_id === se))
       ))
       .map(a => ({
         anomaly_id: a.anomaly_id,
