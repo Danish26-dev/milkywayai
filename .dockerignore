@@ -1,0 +1,43 @@
+# Dependencies & build output (reinstalled/rebuilt inside the image)
+node_modules
+dist
+build
+coverage
+.vite
+*.tsbuildinfo
+
+# VCS & CI
+.git
+.gitignore
+.github
+
+# Environment & secrets — NEVER copy into the image
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
+firebase-adminsdk-*.json
+credentials.json
+*-service-account*.json
+gcp-key*.json
+**/serviceAccount*.json
+*.pem
+*.key
+
+# Tests & local dev artifacts
+**/*.test.ts
+**/*.spec.ts
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.log
+
+# Editor / OS cruft
+.DS_Store
+.vscode
+.idea
+.kiro
+
+# Docs & misc not needed at runtime
+README.md
+bun.lock

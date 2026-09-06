@@ -14,21 +14,24 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { initializeApp, getApps, getApp } from 'firebase-admin/app';
 import { getAuth, DecodedIdToken } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
 import { bigQueryJournalService } from './src/server/bigquery/journalService.ts';
 import { deterministicAnomalyEngine } from './src/server/anomalyEngine.ts';
 import { createMcpApp } from './src/server/mcp/mcpServer.ts';
 import { agentRouter } from './src/server/agent/agentRouter.ts';
-import { investigationRouter } from './src/server/investigationRouter.ts';
+import { investigationRouter, batchSearchHandler } from './src/server/investigationRouter.ts';
+import { isDevAuthEnabled } from './src/server/config.ts';
+import { userService } from './src/server/userService.ts';
+import { alertService } from './src/server/alertService.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Note: file paths use process.cwd() (Cloud-Run-safe); no import.meta / __dirname needed.
 
-// Read Firebase config safely
+// Resolve the Firebase/GCP project id. Precedence:
+//   GOOGLE_CLOUD_PROJECT (set automatically on Cloud Run) -> other GCP env vars ->
+//   the public firebase-applet-config.json (contains NO secrets, only the projectId).
+// NOTE: firebase-applet-config.json holds only the public Firebase Web config
+// (apiKey/authDomain/etc.), which is not a secret. No service-account key is read here.
 let firebaseConfig: any = { projectId: 'milkyway-507714' };
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -39,50 +42,42 @@ try {
   console.warn('[Server] Failed to read firebase-applet-config.json:', e);
 }
 
-// Initialize Firebase Admin lazily / safely
+const resolvedProjectId =
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  process.env.GCLOUD_PROJECT ||
+  process.env.GCP_PROJECT ||
+  firebaseConfig.projectId;
+
+// Initialize Firebase Admin using APPLICATION DEFAULT CREDENTIALS.
+// - On Cloud Run: uses the attached service account identity (no key file).
+// - Locally: uses `gcloud auth application-default login` credentials.
+// No JSON service-account private key is ever loaded from the repository.
 if (!getApps().length) {
   try {
     initializeApp({
-      projectId: firebaseConfig.projectId,
+      projectId: resolvedProjectId,
     });
-    console.log(`[Firebase Admin] Initialized for project: ${firebaseConfig.projectId}`);
+    console.log(`[Firebase Admin] Initialized with ADC for project: ${resolvedProjectId}`);
   } catch (err) {
     console.error('[Firebase Admin] Initialization failed:', err);
   }
 }
 
-// In-memory server-authoritative role cache & Firestore fallback
-// Used for fast and resilient role checking
-const serverUserRegistry = new Map<string, {
-  uid: string;
-  email: string;
-  displayName: string;
-  role: 'OFFICER' | 'ADMIN';
-  badgeNumber?: string;
-  jurisdiction?: string;
-  district?: string;
-  active: boolean;
-}>();
-
-// Seed known initial roles for standard accounts
-serverUserRegistry.set('seed-admin-01', {
-  uid: 'seed-admin-01',
-  email: 'admin@foodsafety.gov.in',
-  displayName: 'National Directorate Admin',
-  role: 'ADMIN',
-  active: true
-});
-
-serverUserRegistry.set('seed-officer-01', {
-  uid: 'seed-officer-01',
-  email: 'p.verma@foodsafety.gov.in',
-  displayName: 'P. Verma',
-  role: 'OFFICER',
-  badgeNumber: 'FSO-IND-9021',
-  jurisdiction: 'North Zone Dairy Enforcement Division',
-  district: 'Sonipat & Rohtak Sub-Districts',
-  active: true
-});
+/**
+ * Resolves a development-only auth token to a seeded user profile from the user service.
+ * Callers MUST first check isDevAuthEnabled(); this function performs no gating itself.
+ * Accepts ONLY the explicit dev tokens 'dev-officer' and 'dev-admin'.
+ * Returns null for anything else so unknown tokens fall through to rejection.
+ */
+function resolveDevAuthUser(token: string) {
+  if (token === 'dev-admin') {
+    return userService.getFromRegistry('seed-admin-01')!;
+  }
+  if (token === 'dev-officer') {
+    return userService.getFromRegistry('seed-officer-01')!;
+  }
+  return null;
+}
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -124,91 +119,48 @@ export async function authenticateFirebaseToken(
     try {
       decodedToken = await getAuth().verifyIdToken(token);
     } catch (verifyErr: any) {
-      // In development or demo preview mode, support mock/demo officer tokens for testing
-      if (token === 'demo-token' || token.startsWith('demo-')) {
-        const isAdmin = token.includes('admin');
-        const demoUser = isAdmin ? serverUserRegistry.get('seed-admin-01')! : serverUserRegistry.get('seed-officer-01')!;
-        req.user = {
-          uid: demoUser.uid,
-          email: demoUser.email,
-          role: demoUser.role,
-          displayName: demoUser.displayName,
-          badgeNumber: demoUser.badgeNumber,
-          token: { uid: demoUser.uid, email: demoUser.email, auth_time: Date.now() / 1000 } as any
-        };
-        return next();
+      // Development-only authentication shortcut.
+      // GUARANTEED disabled in production: isDevAuthEnabled() requires
+      // NODE_ENV !== 'production' AND ENABLE_DEV_AUTH === 'true'.
+      if (isDevAuthEnabled()) {
+        const devUser = resolveDevAuthUser(token);
+        if (devUser) {
+          req.user = {
+            uid: devUser.uid,
+            email: devUser.email,
+            role: devUser.role,
+            displayName: devUser.displayName,
+            badgeNumber: devUser.badgeNumber,
+            token: { uid: devUser.uid, email: devUser.email, auth_time: Date.now() / 1000 } as any
+          };
+          return next();
+        }
       }
 
       console.warn('[Auth Middleware] verifyIdToken failed:', verifyErr.message);
       return res.status(401).json({
-        error: 'Unauthorized: Token verification failed',
-        details: verifyErr.message
+        error: 'Unauthorized: Token verification failed'
       });
     }
 
     const uid = decodedToken.uid;
     const email = decodedToken.email || '';
 
-    // Check user role from Firestore or cached registry
-    let userRole: 'OFFICER' | 'ADMIN' = 'OFFICER';
-    let userProfile = serverUserRegistry.get(uid);
+    // Server-authoritative role resolution via the user service.
+    // Role is NEVER inferred from email text and NEVER taken from the client.
+    // Precedence: verified custom claim (decodedToken.role) -> Firestore users doc -> registry -> OFFICER.
+    const roleFromClaim: 'OFFICER' | 'ADMIN' | null =
+      decodedToken.role === 'ADMIN' ? 'ADMIN' : decodedToken.role === 'OFFICER' ? 'OFFICER' : null;
 
-    if (!userProfile) {
-      try {
-        const firestore = getFirestore();
-        const userDoc = await firestore.collection('users').doc(uid).get();
-        if (userDoc.exists) {
-          const data = userDoc.data();
-          userRole = (data?.role === 'ADMIN' ? 'ADMIN' : 'OFFICER');
-          userProfile = {
-            uid,
-            email: data?.email || email,
-            displayName: data?.displayName || decodedToken.name || email.split('@')[0],
-            role: userRole,
-            badgeNumber: data?.badgeNumber,
-            jurisdiction: data?.jurisdiction,
-            district: data?.district,
-            active: data?.active !== false
-          };
-          serverUserRegistry.set(uid, userProfile);
-        } else {
-          // If no doc yet, default role based on email or OFFICER
-          if (email.toLowerCase().includes('admin')) {
-            userRole = 'ADMIN';
-          } else {
-            userRole = 'OFFICER';
-          }
-          userProfile = {
-            uid,
-            email,
-            displayName: decodedToken.name || email.split('@')[0],
-            role: userRole,
-            badgeNumber: `FSO-${uid.slice(0, 5).toUpperCase()}`,
-            active: true
-          };
-          serverUserRegistry.set(uid, userProfile);
-        }
-      } catch (dbErr) {
-        console.warn('[Auth Middleware] Firestore lookup fallback to token claim/default:', dbErr);
-        if (decodedToken.role === 'ADMIN' || email.toLowerCase().includes('admin')) {
-          userRole = 'ADMIN';
-        }
-        userProfile = {
-          uid,
-          email,
-          displayName: decodedToken.name || email.split('@')[0],
-          role: userRole,
-          active: true
-        };
-      }
-    }
+    const userRole = await userService.resolveRole(uid, roleFromClaim);
+    const profile = userService.getFromRegistry(uid);
 
     req.user = {
       uid,
       email,
-      role: userProfile.role,
-      displayName: userProfile.displayName,
-      badgeNumber: userProfile.badgeNumber,
+      role: userRole,
+      displayName: profile?.displayName || decodedToken.name || email.split('@')[0],
+      badgeNumber: profile?.badgeNumber,
       token: decodedToken
     };
 
@@ -240,7 +192,36 @@ export function requireRole(allowedRoles: Array<'OFFICER' | 'ADMIN'>) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Cloud Run injects PORT (typically 8080). Default to 8080 for parity; never hardcode.
+  const PORT = Number(process.env.PORT) || 8080;
+
+  // 0. CORS (env-based, never wildcard for authenticated APIs).
+  // By default the SPA is served same-origin by this server, so no CORS headers are needed.
+  // If the frontend is hosted on a different origin, set CORS_ALLOWED_ORIGINS to a
+  // comma-separated allowlist (exact origins). Wildcard '*' is intentionally NOT supported
+  // together with credentials.
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+  if (allowedOrigins.length > 0) {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const origin = req.headers.origin;
+      if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      }
+      if (req.method === 'OPTIONS') {
+        // Preflight: 204 for allowed origins, 403 otherwise.
+        res.sendStatus(origin && allowedOrigins.includes(origin) ? 204 : 403);
+        return;
+      }
+      next();
+    });
+  }
 
   // 1. TOP-LEVEL REQUEST DESERIALIZATION (Ordering Guarantee)
   app.use(express.json());
@@ -268,42 +249,49 @@ async function startServer() {
     });
   });
 
-  // 4. Endpoint to register/sync Firestore user document upon sign-up or first login
+  // 4. Secure provisioning/sync on sign-up or first login.
+  // The client CANNOT choose its role. provisionUser() preserves any established role
+  // and otherwise assigns OFFICER; it never elevates. A body-supplied `role` is ignored.
   app.post('/api/auth/sync-user', authenticateFirebaseToken, async (req: AuthenticatedRequest, res: Response) => {
     const { displayName, badgeNumber, jurisdiction, district } = req.body || {};
-    const uid = req.user!.uid;
-    const email = req.user!.email || '';
-
-    // Frontend cannot choose its own role; server enforces it
-    // Check if user already exists
-    let existing = serverUserRegistry.get(uid);
-    const assignedRole: 'OFFICER' | 'ADMIN' = existing?.role || (email.toLowerCase().includes('admin') ? 'ADMIN' : 'OFFICER');
-
-    const userDocData = {
-      uid,
-      displayName: displayName || existing?.displayName || email.split('@')[0],
-      email,
-      role: assignedRole,
-      badgeNumber: badgeNumber || existing?.badgeNumber || `FSO-${uid.slice(0, 5).toUpperCase()}`,
-      jurisdiction: jurisdiction || existing?.jurisdiction || 'State Dairy Enforcement Division',
-      district: district || existing?.district || 'General Enforcement Zone',
-      lastLoginAt: new Date().toISOString(),
-      active: true
-    };
-
-    serverUserRegistry.set(uid, userDocData);
-
     try {
-      const firestore = getFirestore();
-      await firestore.collection('users').doc(uid).set(userDocData, { merge: true });
-    } catch (err) {
-      console.warn('[Sync User] Could not write to remote Firestore directly, stored in server registry:', err);
+      const profile = await userService.provisionUser({
+        uid: req.user!.uid,
+        email: req.user!.email || '',
+        verifiedRole: req.user!.role, // server-derived, never from client
+        displayName,
+        badgeNumber,
+        jurisdiction,
+        district
+      });
+      res.json({ success: true, user: profile });
+    } catch (err: any) {
+      console.error('[Sync User] Provisioning failed:', err);
+      res.status(500).json({ error: 'Failed to provision user' });
     }
+  });
 
-    res.json({
-      success: true,
-      user: userDocData
-    });
+  // 4b. ADMIN-ONLY secure role assignment. This is the ONLY path to grant ADMIN.
+  // Requires the caller to be a verified ADMIN (requireRole). The target uid and role
+  // are validated server-side; a user can never promote themselves via any other route.
+  app.post('/api/admin/users/:uid/role', authenticateFirebaseToken, requireRole(['ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+    const targetUid = req.params.uid;
+    const { role } = req.body || {};
+    if (role !== 'OFFICER' && role !== 'ADMIN') {
+      return res.status(400).json({ error: 'Invalid role. Must be OFFICER or ADMIN.' });
+    }
+    try {
+      const updated = await userService.setUserRole({
+        targetUid,
+        newRole: role,
+        actingUid: req.user!.uid,
+        actingRole: req.user!.role
+      });
+      res.json({ success: true, user: updated });
+    } catch (err: any) {
+      const status = /FORBIDDEN/.test(err.message) ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
   });
 
   // 5. Protected Officer Route: Get Officer's Private Case Data
@@ -354,7 +342,7 @@ async function startServer() {
       success: true,
       message: 'Admin access confirmed.',
       systemMetrics: {
-        activeOfficers: serverUserRegistry.size,
+        activeOfficers: userService.registrySize(),
         auditLogStatus: 'HEALTHY',
         firestoreStatus: 'CONNECTED',
         bigQueryAppendJournal: 'ONLINE'
@@ -395,6 +383,13 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to retrieve batches from BigQuery event journal', details: err.message });
     }
   });
+
+  /**
+   * GET /api/batches/search
+   * Registered BEFORE /api/batches/:batchId so "search" is never matched as a batch id.
+   * Officer/Admin only. Single canonical registration of this route.
+   */
+  app.get('/api/batches/search', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), batchSearchHandler);
 
   /**
    * GET /api/batches/:batchId
@@ -699,20 +694,86 @@ async function startServer() {
     });
   });
 
+  // =========================================================================
+  // FIRESTORE-BACKED ALERTS API (officer-scoped; ADMIN sees all)
+  // =========================================================================
+
+  /**
+   * GET /api/alerts
+   * Lists alerts assigned to the authenticated officer (ADMIN: all).
+   */
+  app.get('/api/alerts', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const alerts = await alertService.listForOfficer(req.user!.uid, req.user!.role === 'ADMIN');
+      res.json({ success: true, count: alerts.length, alerts });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch alerts', details: err.message });
+    }
+  });
+
+  /**
+   * POST /api/alerts
+   * Creates an alert. assignedOfficerUid defaults to the caller unless an ADMIN assigns another.
+   */
+  app.post('/api/alerts', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+    const { batchId, caseId, severity, anomalyType, assignedOfficerUid } = req.body || {};
+    if (!batchId || typeof batchId !== 'string') {
+      return res.status(400).json({ error: 'batchId is required' });
+    }
+    try {
+      const alert = await alertService.createAlert({
+        authUid: req.user!.uid,
+        isAdmin: req.user!.role === 'ADMIN',
+        batchId,
+        caseId: typeof caseId === 'string' ? caseId : null,
+        severity: typeof severity === 'string' ? severity : 'MEDIUM',
+        anomalyType: typeof anomalyType === 'string' ? anomalyType : 'MASS_BALANCE',
+        requestedAssigneeUid: typeof assignedOfficerUid === 'string' ? assignedOfficerUid : undefined
+      });
+      res.status(201).json({ success: true, alert });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to create alert', details: err.message });
+    }
+  });
+
+  /**
+   * PATCH /api/alerts/:alertId/status
+   * Updates alert status (NEW/ACKNOWLEDGED/INVESTIGATING/RESOLVED) with ownership enforcement.
+   */
+  app.patch('/api/alerts/:alertId/status', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+    const { alertId } = req.params;
+    const { status } = req.body || {};
+    try {
+      const alert = await alertService.updateStatus({
+        alertId,
+        status,
+        authUid: req.user!.uid,
+        isAdmin: req.user!.role === 'ADMIN'
+      });
+      res.json({ success: true, alert });
+    } catch (err: any) {
+      if (/FORBIDDEN/.test(err.message)) return res.status(403).json({ error: err.message });
+      if (/NOT_FOUND/.test(err.message)) return res.status(404).json({ error: err.message });
+      if (/INVALID_STATUS/.test(err.message)) return res.status(400).json({ error: err.message });
+      res.status(500).json({ error: 'Failed to update alert status', details: err.message });
+    }
+  });
+
   // 6. Mount Model Context Protocol (MCP) Investigation Tool Server
   app.use(createMcpApp());
 
   // 7. Mount MilkyWay Investigation Agent (Google ADK & Gemini with MCP)
   app.use('/api/agent', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), agentRouter);
 
-  // 8. Mount MilkyWay Officer Console Investigation Routes (Priority investigations, cases, notes, search)
+  // 8. Mount MilkyWay Officer Console Investigation Routes (Priority investigations, cases, notes)
+  // Note: batch search is registered once at GET /api/batches/search (above), not here.
   app.use('/api/investigations', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), investigationRouter);
-  app.get('/api/batches/search', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), (req, res, next) => {
-    (investigationRouter as any).handle(req, res, next);
-  });
 
-  // 8. Vite middleware for development vs. Production static serving
+  // 8. Vite middleware for development vs. Production static serving.
+  // Vite is a devDependency and is imported DYNAMICALLY so it is never required in the
+  // production container (which installs prod deps only and serves the prebuilt dist/).
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -726,9 +787,23 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[MilkyWay Server] Running on port ${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[MilkyWay Server] Running on 0.0.0.0:${PORT} (NODE_ENV=${process.env.NODE_ENV || 'development'})`);
   });
+
+  // Graceful shutdown for the Cloud Run container lifecycle. Cloud Run sends SIGTERM
+  // before stopping an instance; close the HTTP server so in-flight requests can drain.
+  const shutdown = (signal: string) => {
+    console.log(`[MilkyWay Server] ${signal} received: closing HTTP server.`);
+    server.close(() => {
+      console.log('[MilkyWay Server] HTTP server closed gracefully.');
+      process.exit(0);
+    });
+    // Failsafe: force-exit if connections do not drain in time.
+    setTimeout(() => process.exit(0), 10000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer();

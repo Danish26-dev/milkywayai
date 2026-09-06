@@ -78,41 +78,64 @@ JOURNAL → TRACE → DETECT → INVESTIGATE → INSPECT
 
 ---
 
-### Secret Manager Configuration
-Operational credentials, including the Gemini API key and service accounts, are never committed to repositories or injected into client bundles.
+### Gemini via Vertex AI + ADC (no API key)
+Production Gemini access uses **Vertex AI** authenticated with **Application Default
+Credentials (ADC)** — the attached Cloud Run runtime service account. There is **no
+Gemini API key** and **no service-account JSON** anywhere. The backend builds the
+client as `new GoogleGenAI({ vertexai: true, project, location })`
+(see `src/server/geminiAuth.ts` and `src/server/geminiClient.ts`).
+
+- Project: `milkyway-507714`
+- Location: `GEMINI_LOCATION` (default `us-central1`)
+- Model: `GEMINI_MODEL` (default `gemini-2.5-flash`)
+
+If Vertex AI is unavailable, the backend returns `AI_UNAVAILABLE` and never fabricates output.
+
+Enable the API and grant least-privilege IAM to the runtime service account:
 
 ```bash
-# 1. Create and populate the secret
-gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
-echo -n "YOUR_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+PROJECT_ID=milkyway-507714
+RUNTIME_SA="milkyway-run@${PROJECT_ID}.iam.gserviceaccount.com"
 
-# 2. Grant the Cloud Run compute service account access to read the secret
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+# Enable Vertex AI
+gcloud services enable aiplatform.googleapis.com --project="$PROJECT_ID"
 
-gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+# Create the runtime service account (once)
+gcloud iam service-accounts create milkyway-run \
+  --display-name="MilkyWay Cloud Run runtime" --project="$PROJECT_ID"
+
+# Vertex AI access (least privilege) — the ONLY role needed for Gemini
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/aiplatform.user"
 ```
+
+The runtime service account also needs Firebase/Firestore access for token verification,
+custom claims, and case persistence (e.g. `roles/datastore.user` and
+`roles/firebaseauth.admin`) — never broad project Owner/Editor. No
+`roles/secretmanager.secretAccessor` is required for Gemini anymore.
+
+> Secret Manager remains available for genuine future secrets (`src/server/secretProvider.ts`),
+> but is no longer used to store a Gemini API key.
 
 ---
 
-### Firestore Security Rules
-Ensure owner-bound isolation and strict Role-Based Access Control (RBAC) preventing unauthorized reads into anomaly investigation cases:
+### Application Default Credentials (ADC)
+No JSON service-account key is stored in the repository. Authentication uses ADC:
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId}/interactions/{interactionId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /cases/{caseId} {
-      allow read, write: if request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer';
-    }
-  }
-}
-```
+- **Cloud Run**: the attached runtime service account identity (above).
+- **Local development** (uses Vertex AI by default):
+  ```bash
+  gcloud auth application-default login
+  gcloud config set project milkyway-507714
+  ```
+  Optionally, set `GEMINI_API_KEY` in `.env` and leave `GEMINI_USE_VERTEX` unset to use
+  the Gemini Developer API locally instead of Vertex AI. Production never uses a key.
+
+### Firestore Security Rules
+The authoritative, claim-based rules live in [`firestore.rules`](./firestore.rules) and are
+machine-verifiable via the emulator (`npm run test:rules`). Roles come from verified
+Firebase custom claims (`request.auth.token.role`), never from client-writable documents.
 
 ---
 
@@ -120,14 +143,19 @@ service cloud.firestore {
 
 Deploy the MilkyWay application container directly to Google Cloud Run:
 
+> Note (Stage 3A): the Gemini key is retrieved at runtime from Secret Manager by the
+> application (via ADC), so `--set-secrets` for the Gemini key is NOT required. Attach the
+> dedicated runtime service account instead. Full Cloud Run packaging/deployment is Stage 3.
+
 ```bash
-# Build and deploy service
+# Build and deploy service (illustrative; full deployment is a later stage)
 gcloud run deploy milkyway-platform \
   --source . \
   --region us-central1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+  --service-account="milkyway-run@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --set-env-vars="NODE_ENV=production" \
   --min-instances=1 \
   --memory=1Gi \
   --port=3000
@@ -166,3 +194,32 @@ Visit `http://localhost:3000` to preview the platform.
 1. **Mass-Balance Determinism**: Verify that adjusting scenario inputs computes exact arithmetic shortfalls (`Input - Loss - Output`) without calling LLM endpoints.
 2. **Investigation Synthesis**: Verify that clicking *Re-Run Investigation Sequence* iterates sequentially across the 6 MCP tools before presenting the structured brief.
 3. **Non-Diagnostic Compliance**: Confirm that all outputs use terms such as *investigation signal*, *unexplained discrepancy*, and *prioritize physical inspection*, avoiding unauthorized diagnostic assertions.
+
+---
+
+## Firestore Security Rules — Emulator Verification (Stage 2.5)
+
+The real `firestore.rules` are machine-verified with `@firebase/rules-unit-testing`
+against the Firebase Firestore Emulator (no mocked authorization).
+
+Prerequisites:
+- A Java runtime (JDK 11+). The Firestore emulator is a Java application.
+- `firebase-tools` (installed as a devDependency).
+
+Run the rules test suite:
+```bash
+npm run test:rules
+```
+This launches the Firestore emulator via `firebase emulators:exec` and executes
+`src/server/firestoreRules.emulator.test.ts`, which asserts, using authenticated
+contexts with custom claims (officerA / officerB / admin), that:
+- users cannot change their own `role`/`uid` or self-promote to ADMIN;
+- officers can only read/update their own or shared cases (no `assignedOfficerUid` hijack);
+- officer notes, chat summaries, and alerts are owner-isolated;
+- admin has the intended elevated access.
+
+Other suites (no Java required):
+```bash
+npm test            # anomaly engine, MCP, agent, auth, cross-user isolation
+npm run lint        # tsc --noEmit
+```

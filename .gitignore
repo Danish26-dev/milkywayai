@@ -4,5 +4,19 @@ dist/
 coverage/
 .DS_Store
 *.log
+
+# Environment files: ignore all except the committed template.
 .env*
 !.env.example
+
+# Service-account / credential key files must NEVER be committed.
+# (ADC is used instead — see .env.example.)
+serviceAccountKey.json
+firebase-adminsdk-*.json
+credentials.json
+*-service-account*.json
+gcp-key*.json
+**/serviceAccount*.json
+
+# NOTE: firebase.json and firebase-applet-config.json are legitimate, non-secret
+# configuration and are intentionally NOT ignored.

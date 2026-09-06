@@ -1,7 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions for authorization
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -10,88 +13,131 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function hasRole(role) {
-      return isAuthenticated() && (
-        request.auth.token.role == role ||
-        getUserData().role == role
-      );
+    // Role comes ONLY from the verified custom claim on the ID token.
+    // It is never read from a client-writable document, preventing self-escalation.
+    function claimRole() {
+      return isAuthenticated() ? request.auth.token.role : '';
     }
 
     function isAdmin() {
-      return hasRole('ADMIN') || hasRole('admin');
+      return claimRole() == 'ADMIN';
     }
 
     function isOfficer() {
-      return hasRole('OFFICER') || hasRole('officer') || isAdmin();
+      return claimRole() == 'OFFICER' || isAdmin();
     }
 
-    // 1. users collection
-    // User can read their own profile; Admin can read all; Role field can ONLY be modified by Admins
+    // ---------------------------------------------------------------------
+    // users/{uid}
+    // A user may read their own profile; ADMIN may read all.
+    // A user may NOT create/alter role, uid, or other authorization fields.
+    // Role changes happen ONLY via the Admin SDK backend (which bypasses rules).
+    // ---------------------------------------------------------------------
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId);
-      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
-      allow delete: if isAdmin();
+
+      // On self-create, the user cannot grant themselves a privileged role.
+      allow create: if isOwner(userId)
+        && (!('role' in request.resource.data) || request.resource.data.role == 'OFFICER')
+        && request.resource.data.uid == userId;
+
+      // On self-update, role and uid must be UNCHANGED. ADMIN role management is
+      // performed server-side with the Admin SDK (not through client updates).
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role;
+
+      allow delete: if false; // never delete users from the client
     }
 
-    // 2. cases/{caseId}
-    // An officer may access:
-    // - Their assigned cases (assignedOfficerUid == request.auth.uid)
-    // - Cases explicitly shared with them (sharedWithUids contains request.auth.uid)
-    // An admin may access according to admin policy.
-    // Never trust frontend-supplied officerUid; authenticated UID is enforced.
+    // ---------------------------------------------------------------------
+    // cases/{caseId}
+    // Officer can read/update cases assigned to them or shared with them; ADMIN all.
+    // An officer can NEVER reassign a case to another officer (assignedOfficerUid
+    // must remain unchanged on officer updates). Only ADMIN may reassign.
+    // On create, the assignedOfficerUid MUST equal the creator (or creator is ADMIN).
+    // ---------------------------------------------------------------------
     match /cases/{caseId} {
-      allow read: if isOfficer() && (
-        resource.data.assignedOfficerUid == request.auth.uid ||
-        (resource.data.sharedWithUids != null && request.auth.uid in resource.data.sharedWithUids) ||
-        isAdmin()
-      );
-      allow create: if isOfficer() && (
-        request.resource.data.assignedOfficerUid == request.auth.uid ||
-        isAdmin()
-      );
-      allow update: if isOfficer() && (
-        resource.data.assignedOfficerUid == request.auth.uid ||
-        (resource.data.sharedWithUids != null && request.auth.uid in resource.data.sharedWithUids) ||
-        isAdmin()
-      );
+      function assigned() { return resource.data.assignedOfficerUid; }
+      function sharedList() {
+        return ('sharedWithUids' in resource.data) ? resource.data.sharedWithUids : [];
+      }
+      function canReadCase() {
+        return isAdmin()
+          || (isOfficer() && (assigned() == request.auth.uid || request.auth.uid in sharedList()));
+      }
+
+      allow read: if canReadCase();
+
+      allow create: if isOfficer()
+        && (isAdmin() || request.resource.data.assignedOfficerUid == request.auth.uid);
+
+      // Officer updates must keep ownership stable (no hijack, no self-reassign to others).
+      allow update: if isAdmin()
+        || (isOfficer()
+            && (assigned() == request.auth.uid || request.auth.uid in sharedList())
+            && request.resource.data.assignedOfficerUid == resource.data.assignedOfficerUid);
+
       allow delete: if isAdmin();
 
-      // Legacy subcollection support for backwards compatibility
+      // Legacy embedded subcollections (kept read-restricted to authorized case viewers).
       match /notes/{noteId} {
-        allow read: if isOfficer();
-        allow create: if isOfficer() && request.resource.data.officerId == request.auth.uid;
+        allow read: if isAdmin()
+          || (isOfficer() && get(/databases/$(database)/documents/cases/$(caseId)).data.assignedOfficerUid == request.auth.uid);
+        allow create: if isOfficer() && request.resource.data.authorUid == request.auth.uid;
         allow update, delete: if false;
+      }
+      match /chat/{msgId} {
+        allow read: if isAdmin()
+          || (isOfficer() && get(/databases/$(database)/documents/cases/$(caseId)).data.assignedOfficerUid == request.auth.uid);
+        allow write: if false; // chat is written server-side via Admin SDK
       }
     }
 
-    // 3. officer_notes/{noteId}
-    // Top-level collection storing: noteId, caseId, officerUid, content, createdAt
+    // ---------------------------------------------------------------------
+    // officer_notes/{noteId}
+    // A note is private to its author (and the case's assigned officer / ADMIN).
+    // authorUid must equal the creator; notes are immutable from the client.
+    // ---------------------------------------------------------------------
     match /officer_notes/{noteId} {
-      allow read: if isOfficer();
-      allow create: if isOfficer() && request.resource.data.officerUid == request.auth.uid;
-      allow update: if isOfficer() && resource.data.officerUid == request.auth.uid;
+      allow read: if isAdmin()
+        || (isOfficer() && resource.data.authorUid == request.auth.uid);
+      allow create: if isOfficer() && request.resource.data.authorUid == request.auth.uid;
+      allow update: if isOfficer()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid;
       allow delete: if isAdmin();
     }
 
-    // 4. chat_summaries/{caseId}
-    // Stores concise investigation conversation summaries rather than raw token floods
-    match /chat_summaries/{caseId} {
-      allow read: if isOfficer();
-      allow write: if isOfficer();
+    // ---------------------------------------------------------------------
+    // chat_summaries/{summaryId}
+    // Owned by the officer who created it (officerUid). Only that officer or ADMIN
+    // may read; officerUid is immutable and must match the creator.
+    // ---------------------------------------------------------------------
+    match /chat_summaries/{summaryId} {
+      allow read: if isAdmin()
+        || (isOfficer() && resource.data.officerUid == request.auth.uid);
+      allow create: if isOfficer() && request.resource.data.officerUid == request.auth.uid;
+      allow update: if isOfficer()
+        && resource.data.officerUid == request.auth.uid
+        && request.resource.data.officerUid == resource.data.officerUid;
+      allow delete: if isAdmin();
     }
 
-    // 5. alerts/{alertId}
-    // Persists detected anomalies as application alerts:
-    // alertId, batchId, anomalyId, severity, facilityId, status, createdAt
+    // ---------------------------------------------------------------------
+    // alerts/{alertId}
+    // Officer sees alerts assigned to them; ADMIN sees all.
+    // assignedOfficerUid is immutable on officer updates.
+    // ---------------------------------------------------------------------
     match /alerts/{alertId} {
-      allow read: if isOfficer();
-      allow create: if isOfficer();
-      allow update: if isOfficer();
+      allow read: if isAdmin()
+        || (isOfficer() && resource.data.assignedOfficerUid == request.auth.uid);
+      allow create: if isOfficer()
+        && (isAdmin() || request.resource.data.assignedOfficerUid == request.auth.uid);
+      allow update: if isAdmin()
+        || (isOfficer()
+            && resource.data.assignedOfficerUid == request.auth.uid
+            && request.resource.data.assignedOfficerUid == resource.data.assignedOfficerUid);
       allow delete: if isAdmin();
     }
   }
