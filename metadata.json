@@ -1,0 +1,6 @@
+{
+  "name": "MilkyWay",
+  "description": "Milk supply-chain anomaly detection and investigation platform for Food Safety Officers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
