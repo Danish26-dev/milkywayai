@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🥛 MilkyWay
+# <img width="600" height="507" alt="milky way logo" src="https://github.com/user-attachments/assets/03ff5295-2784-4f6d-b1b5-ccdbccebf751" /> MilkyWay
 ### Milk Supply-Chain Anomaly Detection & Investigation Platform
 
 **Trace every litre. Find every discrepancy.**
@@ -24,25 +24,6 @@
 
 ---
 
-## 📌 Table of Contents
-
-- [What is MilkyWay?](#-what-is-milkyway)
-- [Critical Regulatory Boundary](#-critical-regulatory--positioning-boundary)
-- [The Core Idea](#-the-core-idea)
-- [System Architecture](#-system-architecture)
-- [Investigation Sequence](#-investigation-sequence)
-- [How Anomaly Detection Works](#-how-anomaly-detection-works)
-- [Threat Model & Security](#-threat-model-the-5-threat-zones)
-- [Tech Stack](#-tech-stack)
-- [Screenshots](#-screenshots)
-- [Getting Started](#-getting-started)
-- [Cloud Infrastructure Setup](#-cloud-infrastructure--security-configuration)
-- [Cloud Run Deployment](#-cloud-run-deployment)
-- [Testing & Verification](#-testing--verification-protocol)
-- [Roadmap](#-roadmap)
-- [Built With](#-built-with)
-
----
 
 ## 🔍 What is MilkyWay?
 
