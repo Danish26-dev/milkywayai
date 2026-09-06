@@ -132,13 +132,13 @@ export interface SupplyChainEvent {
   previousEventHash: string; // Blockchain-style chained tamper evidence
 }
 
-export type AnomalyType = 
-  | 'MASS_BALANCE_SURPLUS'        // More milk exited than entered + expected variance
-  | 'MASS_BALANCE_EXCESSIVE_LOSS' // Unexplained missing volume
-  | 'VELOCITY_IMPOSSIBILITY'      // Tanker arrived faster than physical road transit allows
-  | 'TEMPERATURE_EXCURSION'       // Cold-chain break > 7°C for extended duration
-  | 'DILUTION_METRIC_DIVERGENCE'  // Discrepancy between reported SNF/Fat ratios
-  | 'GHOST_TANKER_DISPATCH';      // Discharge logged without matching origin dispatch
+/**
+ * Canonical MVP anomaly type model. Exactly two deterministic types.
+ * These MUST match the server DeterministicAnomalyEngine AnomalyType.
+ */
+export type AnomalyType =
+  | 'MASS_BALANCE'        // Unexplained input/output volume discrepancy
+  | 'IMPOSSIBLE_MOVEMENT'; // Physically implausible transit velocity / timing
 
 export interface Anomaly {
   id: string;

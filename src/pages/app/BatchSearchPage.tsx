@@ -127,18 +127,18 @@ export const BatchSearchPage: React.FC = () => {
     setSearchParams({ q });
 
     try {
-      let token = 'demo-token';
+      let token: string | null = null;
       try {
         const u = auth.currentUser;
         if (u) token = await u.getIdToken();
       } catch (e) {
-        // use fallback
+        // No token; server will reject unauthenticated requests.
       }
 
       const res = await fetch(`/api/batches/search?q=${encodeURIComponent(q)}`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         }
       });
 
@@ -173,12 +173,12 @@ export const BatchSearchPage: React.FC = () => {
     setInvestigationResult(null);
     setInvestigationSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'PENDING' })));
 
-    let token = 'demo-token';
+    let token: string | null = null;
     try {
       const u = auth.currentUser;
       if (u) token = await u.getIdToken();
     } catch (e) {
-      // preview fallback
+      // No token; server will reject unauthenticated requests.
     }
 
     try {
@@ -228,8 +228,8 @@ export const BatchSearchPage: React.FC = () => {
           const postRes = await fetch('/api/investigations/execute', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             },
             body: JSON.stringify({ batchId: batchData.batchId })
           });

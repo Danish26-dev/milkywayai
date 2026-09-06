@@ -209,10 +209,8 @@ export const DashboardPage: React.FC = () => {
                     {/* 4. Anomaly */}
                     <td className="py-3 px-4 max-w-xs">
                       <span className="font-medium text-[#202521] block">
-                        {c.primaryAnomalyType === 'MASS_BALANCE_SURPLUS' && 'UNACCOUNTED QUANTITY (+1,200 L Surplus)'}
-                        {c.primaryAnomalyType === 'VELOCITY_IMPOSSIBILITY' && 'IMPLAUSIBLE MOVEMENT (175.7 km/h)'}
-                        {c.primaryAnomalyType === 'MASS_BALANCE_EXCESSIVE_LOSS' && 'SUPPLY-CHAIN ANOMALY (Excessive Shrinkage)'}
-                        {c.primaryAnomalyType === 'TEMPERATURE_EXCURSION' && 'INVESTIGATION SIGNAL (Thermal Excursion)'}
+                        {c.primaryAnomalyType === 'MASS_BALANCE' && 'UNACCOUNTED QUANTITY (Mass-Balance Discrepancy)'}
+                        {c.primaryAnomalyType === 'IMPOSSIBLE_MOVEMENT' && 'IMPLAUSIBLE MOVEMENT (Transit Velocity)'}
                       </span>
                       <span className="text-[10px] font-mono text-[#202521]/65 line-clamp-1">
                         Case {c.caseNumber}

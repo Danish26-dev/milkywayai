@@ -87,7 +87,7 @@ export const InvestigationDetailPage: React.FC = () => {
     setIsSendingChat(true);
 
     try {
-      let token = 'demo-token';
+      let token: string | null = null;
       try {
         const u = auth.currentUser;
         if (u) token = await u.getIdToken();
@@ -96,8 +96,8 @@ export const InvestigationDetailPage: React.FC = () => {
       const res = await fetch(`/api/investigations/${encodeURIComponent(caseData.id)}/chat`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify({ message: userText })
       });

@@ -149,7 +149,7 @@ export const SEED_ANOMALIES: Anomaly[] = [
     id: 'ANOM-DEMO-MB-330L',
     batchId: 'BATCH-DEMO-003-ANOMALOUS',
     facilityId: 'FAC-AMUL-03',
-    type: 'MASS_BALANCE_EXCESSIVE_LOSS',
+    type: 'MASS_BALANCE',
     title: 'Unexplained Mass-Balance Discrepancy (330 L Shortfall)',
     description: 'Deterministic mass-balance computation detected 330.0 L unexplained volume shortfall between expected processing output (980.0 L) and recorded dispatch (650.0 L, -33.67% variance). Permitted evaporation threshold is ±2.0%. Root cause requires physical inspection and facility log audit to verify.',
     detectedAt: '2026-09-05T11:45:30Z',
@@ -170,7 +170,7 @@ export const SEED_ANOMALIES: Anomaly[] = [
     id: 'ANOM-2026-0811',
     batchId: 'BATCH-2026-0901',
     facilityId: 'FAC-LUD-02',
-    type: 'MASS_BALANCE_SURPLUS',
+    type: 'MASS_BALANCE',
     title: 'Unexplained Inflow/Outflow Volume Expansion',
     description: 'Post-pasteurization volumetric meter reported 1,420 litres in excess of intake volume combined with registered thermal expansion limits (+3.8%).',
     detectedAt: '2026-09-05T08:42:15Z',
@@ -191,7 +191,7 @@ export const SEED_ANOMALIES: Anomaly[] = [
     id: 'ANOM-2026-0812',
     batchId: 'BATCH-2026-0894',
     facilityId: 'FAC-JAL-04',
-    type: 'VELOCITY_IMPOSSIBILITY',
+    type: 'IMPOSSIBLE_MOVEMENT',
     title: 'Physically Impossible Highway Transit Duration',
     description: 'Tanker PB-10-CZ-3320 completed 82 km route between collection depot and chilling plant in 28 minutes (required average velocity 175.7 km/h).',
     detectedAt: '2026-09-05T07:44:00Z',
@@ -212,7 +212,7 @@ export const SEED_ANOMALIES: Anomaly[] = [
     id: 'ANOM-2026-0813',
     batchId: 'BATCH-2026-0887',
     facilityId: 'FAC-LUD-02',
-    type: 'MASS_BALANCE_EXCESSIVE_LOSS',
+    type: 'MASS_BALANCE',
     title: 'Elevated Process Loss Above Permitted Shrinkage Threshold',
     description: 'Chilling transfer logged an unaccounted loss of 890 litres (-6.2%), exceeding standard plant evaporation allowance (max 0.8%).',
     detectedAt: '2026-09-05T06:10:30Z',
@@ -229,27 +229,6 @@ export const SEED_ANOMALIES: Anomaly[] = [
     inspectionPriority: 'HIGH',
     status: 'UNDER_INVESTIGATION'
   },
-  {
-    id: 'ANOM-2026-0814',
-    batchId: 'BATCH-2026-0870',
-    facilityId: 'FAC-SON-09',
-    type: 'TEMPERATURE_EXCURSION',
-    title: 'Prolonged Cold-Chain Thermal Excursion',
-    description: 'Holding silo sensor sustained readings above 8.4°C for 3 hours and 20 minutes prior to packaging dispatch.',
-    detectedAt: '2026-09-04T22:15:00Z',
-    severity: 'MEDIUM',
-    deterministicMetric: {
-      expectedQuantityLitres: 22000,
-      recordedQuantityLitres: 22000,
-      discrepancyLitres: 0,
-      variancePercentage: 0.0,
-      toleranceThresholdPercentage: 0.0,
-      computationRule: 'Deterministic Cold-Chain Rule: Temperature > 7.0°C continuously for > 45 minutes'
-    },
-    evidenceConfidenceScore: 0.88,
-    inspectionPriority: 'SCHEDULED',
-    status: 'UNRESOLVED'
-  }
 ];
 
 export const SEED_BATCHES: Batch[] = [
@@ -368,8 +347,8 @@ export const SEED_BATCHES: Batch[] = [
     unaccountedDiscrepancyLitres: 0,
     createdAt: '2026-09-04T18:00:00Z',
     lastEventTimestamp: '2026-09-04T22:15:00Z',
-    status: 'ANOMALY_FLAGGED',
-    associatedAnomalyIds: ['ANOM-2026-0814'],
+    status: 'NORMAL',
+    associatedAnomalyIds: [],
     eventCount: 5
   },
   {
@@ -744,7 +723,7 @@ export const SEED_INVESTIGATION_CASES: InvestigationCase[] = [
     facilityId: 'FAC-LUD-02',
     facilityName: 'Ludhiana Central Dairy Processing Facility',
     primaryAnomalyId: 'ANOM-2026-0811',
-    primaryAnomalyType: 'MASS_BALANCE_SURPLUS',
+    primaryAnomalyType: 'MASS_BALANCE',
     priority: 'IMMEDIATE',
     status: 'ESCALATED_TO_INSPECTION',
     discrepancyLitres: 1420,
@@ -842,7 +821,7 @@ export const SEED_INVESTIGATION_CASES: InvestigationCase[] = [
     facilityId: 'FAC-JAL-04',
     facilityName: 'Jalandhar Industrial Cold Chilling Plant',
     primaryAnomalyId: 'ANOM-2026-0812',
-    primaryAnomalyType: 'VELOCITY_IMPOSSIBILITY',
+    primaryAnomalyType: 'IMPOSSIBLE_MOVEMENT',
     priority: 'IMMEDIATE',
     status: 'ACTIVE_ANALYSIS',
     discrepancyLitres: 0,
@@ -890,7 +869,7 @@ export const SEED_INVESTIGATION_CASES: InvestigationCase[] = [
     facilityId: 'FAC-LUD-02',
     facilityName: 'Ludhiana Central Dairy Processing Facility',
     primaryAnomalyId: 'ANOM-2026-0813',
-    primaryAnomalyType: 'MASS_BALANCE_EXCESSIVE_LOSS',
+    primaryAnomalyType: 'MASS_BALANCE',
     priority: 'HIGH',
     status: 'ASSIGNED',
     discrepancyLitres: -890,
@@ -902,24 +881,6 @@ export const SEED_INVESTIGATION_CASES: InvestigationCase[] = [
     evidenceItems: [],
     officerNotes: []
   },
-  {
-    id: 'CASE-2026-044',
-    caseNumber: 'INV-FSO-2026-044',
-    batchId: 'BATCH-2026-0870',
-    batchCode: 'MW-HR-26-0870',
-    facilityId: 'FAC-SON-09',
-    facilityName: 'Sonipat Distribution Depot & Packaging Hub',
-    primaryAnomalyId: 'ANOM-2026-0814',
-    primaryAnomalyType: 'TEMPERATURE_EXCURSION',
-    priority: 'MEDIUM',
-    status: 'QUEUED',
-    discrepancyLitres: 0,
-    variancePercentage: 0.0,
-    createdAt: '2026-09-04T22:30:00Z',
-    updatedAt: '2026-09-04T22:30:00Z',
-    evidenceItems: [],
-    officerNotes: []
-  }
 ];
 
 export const SEED_ALERTS: ActiveAlert[] = [
@@ -962,17 +923,4 @@ export const SEED_ALERTS: ActiveAlert[] = [
     isRead: true,
     inspectionPriority: 'HIGH'
   },
-  {
-    id: 'ALT-004',
-    anomalyId: 'ANOM-2026-0814',
-    batchId: 'BATCH-2026-0870',
-    facilityId: 'FAC-SON-09',
-    facilityName: 'Sonipat Distribution Depot & Packaging Hub',
-    title: 'Cold-Chain Thermal Excursion (> 8.4°C for 3h 20m)',
-    summary: 'Storage Silo-02 thermal excursion logged prior to retail packaging dispatch.',
-    severity: 'ADVISORY',
-    createdAt: '2026-09-04T22:15:00Z',
-    isRead: true,
-    inspectionPriority: 'SCHEDULED'
-  }
 ];

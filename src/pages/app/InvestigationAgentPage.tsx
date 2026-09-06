@@ -52,7 +52,7 @@ interface ChatMessage {
 }
 
 export const InvestigationAgentPage: React.FC = () => {
-  const { officer } = useAuth();
+  const { officer, getIdToken } = useAuth();
   const [searchParams] = useSearchParams();
   const initialBatch = searchParams.get('batch') || '';
 
@@ -70,10 +70,9 @@ export const InvestigationAgentPage: React.FC = () => {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
+        const token = await getIdToken();
         const res = await fetch('/api/agent/status', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || 'demo-token'}`
-          }
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
         if (res.ok) {
           const data = await res.json();
@@ -114,11 +113,12 @@ export const InvestigationAgentPage: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
 
     try {
+      const token = await getIdToken();
       const res = await fetch('/api/agent/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || 'demo-token'}`
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           sessionId,
@@ -240,7 +240,7 @@ export const InvestigationAgentPage: React.FC = () => {
                 <span className="w-2 h-2 rounded-full bg-[#3D6E50] animate-pulse" />
                 4 MCP Tools Connected
               </span>
-              <span>Model: gemini-3.8-flash (Fallback Ladder)</span>
+              <span>Model: {agentStatus?.gemini_model || 'not configured'}</span>
             </div>
             <button
               onClick={resetSession}

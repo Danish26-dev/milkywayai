@@ -53,23 +53,23 @@ import {
 } from './seedData';
 import { auth } from '../lib/firebase';
 
+/**
+ * Builds request headers with the verified Firebase ID token when a user is
+ * signed in. Never sends demo/test tokens — the server rejects those in
+ * production, and authentication must rely on real Firebase tokens.
+ */
 async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
     const user = auth.currentUser;
     if (user) {
       const token = await user.getIdToken();
-      return {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      };
+      headers['Authorization'] = `Bearer ${token}`;
     }
   } catch (e) {
-    // offline or preview fallback
+    // No token available; request proceeds unauthenticated and the server will reject it.
   }
-  return {
-    'Authorization': 'Bearer demo-token',
-    'Content-Type': 'application/json'
-  };
+  return headers;
 }
 
 // Local mutable state for realistic in-session interactions (e.g. adding officer notes or changing case status)
@@ -279,7 +279,7 @@ export const investigationService: InvestigationService = {
             facilityId: item.facilityId,
             facilityName: item.facility,
             primaryAnomalyId: `ANOM-${item.batch}`,
-            primaryAnomalyType: item.anomaly.includes('UNACCOUNTED') ? 'MASS_BALANCE_EXCESSIVE_LOSS' : 'MASS_BALANCE_SURPLUS',
+            primaryAnomalyType: item.anomaly && item.anomaly.includes('MOVEMENT') ? 'IMPOSSIBLE_MOVEMENT' : 'MASS_BALANCE',
             priority: item.priority,
             status: item.status,
             discrepancyLitres: item.discrepancy ? parseFloat(item.discrepancy.replace(/[^0-9.-]/g, '')) || 0 : 0,
@@ -411,10 +411,54 @@ export const investigationService: InvestigationService = {
 
 export const alertService: AlertService = {
   async getActiveAlerts(): Promise<ActiveAlert[]> {
+    // Backend Firestore alerts are authoritative when authenticated & reachable.
+    try {
+      const user = auth.currentUser;
+      if (user) {
+        const headers = await getAuthHeaders();
+        const res = await fetch('/api/alerts', { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.alerts)) {
+            return data.alerts.map((a: any): ActiveAlert => ({
+              id: a.alertId,
+              anomalyId: a.alertId,
+              batchId: a.batchId,
+              facilityId: a.facilityId || 'UNKNOWN',
+              facilityName: a.facilityName || 'Supply Chain Node',
+              title: `${a.anomalyType === 'IMPOSSIBLE_MOVEMENT' ? 'Implausible Movement' : 'Mass-Balance Discrepancy'} — ${a.batchId}`,
+              summary: `Alert status ${a.status}. Severity ${a.severity}.`,
+              severity: a.severity === 'CRITICAL' ? 'CRITICAL' : a.severity === 'HIGH' ? 'WARNING' : 'ADVISORY',
+              createdAt: a.createdAt,
+              isRead: a.status !== 'NEW',
+              inspectionPriority: a.severity === 'CRITICAL' ? 'IMMEDIATE' : a.severity === 'HIGH' ? 'HIGH' : 'SCHEDULED'
+            }));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[alertService] Backend alerts unavailable; using local demo fallback.');
+    }
+    // Explicit local-dev fallback (only when unauthenticated or backend unreachable).
     return localAlerts;
   },
 
   async dismissAlert(alertId: string): Promise<boolean> {
+    // Acknowledge on the backend when available; fall back to local state.
+    try {
+      const user = auth.currentUser;
+      if (user) {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/status`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ status: 'ACKNOWLEDGED' })
+        });
+        if (res.ok) return true;
+      }
+    } catch (e) {
+      console.warn('[alertService] Backend dismiss unavailable; using local demo fallback.');
+    }
     localAlerts = localAlerts.map(a => a.id === alertId ? { ...a, isRead: true } : a);
     return true;
   }
