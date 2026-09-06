@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img width="600" height="507" alt="milky way logo" src="https://github.com/user-attachments/assets/03ff5295-2784-4f6d-b1b5-ccdbccebf751" /> MilkyWay
+# <img width="45" height="45" alt="milky way logo" src="https://github.com/user-attachments/assets/03ff5295-2784-4f6d-b1b5-ccdbccebf751" /> MilkyWay
 ### Milk Supply-Chain Anomaly Detection & Investigation Platform
 
 **Trace every litre. Find every discrepancy.**
