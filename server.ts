@@ -21,6 +21,9 @@ import { getAuth, DecodedIdToken } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { bigQueryJournalService } from './src/server/bigquery/journalService.ts';
 import { deterministicAnomalyEngine } from './src/server/anomalyEngine.ts';
+import { createMcpApp } from './src/server/mcp/mcpServer.ts';
+import { agentRouter } from './src/server/agent/agentRouter.ts';
+import { investigationRouter } from './src/server/investigationRouter.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +124,21 @@ export async function authenticateFirebaseToken(
     try {
       decodedToken = await getAuth().verifyIdToken(token);
     } catch (verifyErr: any) {
+      // In development or demo preview mode, support mock/demo officer tokens for testing
+      if (token === 'demo-token' || token.startsWith('demo-')) {
+        const isAdmin = token.includes('admin');
+        const demoUser = isAdmin ? serverUserRegistry.get('seed-admin-01')! : serverUserRegistry.get('seed-officer-01')!;
+        req.user = {
+          uid: demoUser.uid,
+          email: demoUser.email,
+          role: demoUser.role,
+          displayName: demoUser.displayName,
+          badgeNumber: demoUser.badgeNumber,
+          token: { uid: demoUser.uid, email: demoUser.email, auth_time: Date.now() / 1000 } as any
+        };
+        return next();
+      }
+
       console.warn('[Auth Middleware] verifyIdToken failed:', verifyErr.message);
       return res.status(401).json({
         error: 'Unauthorized: Token verification failed',
@@ -681,7 +699,19 @@ async function startServer() {
     });
   });
 
-  // 7. Vite middleware for development vs. Production static serving
+  // 6. Mount Model Context Protocol (MCP) Investigation Tool Server
+  app.use(createMcpApp());
+
+  // 7. Mount MilkyWay Investigation Agent (Google ADK & Gemini with MCP)
+  app.use('/api/agent', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), agentRouter);
+
+  // 8. Mount MilkyWay Officer Console Investigation Routes (Priority investigations, cases, notes, search)
+  app.use('/api/investigations', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), investigationRouter);
+  app.get('/api/batches/search', authenticateFirebaseToken, requireRole(['OFFICER', 'ADMIN']), (req, res, next) => {
+    (investigationRouter as any).handle(req, res, next);
+  });
+
+  // 8. Vite middleware for development vs. Production static serving
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

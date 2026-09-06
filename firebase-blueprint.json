@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated platform user profile with RBAC role designation.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Authentication UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full name or display identifier" },
+        "role": { "type": "string", "enum": ["OFFICER", "ADMIN", "FARMER"], "description": "RBAC security role" },
+        "badgeNumber": { "type": "string", "description": "Official inspector badge number" },
+        "jurisdiction": { "type": "string", "description": "Enforcement territory" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLoginAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Case": {
+      "title": "Case",
+      "description": "Investigation case dossier for supply-chain anomalies.",
+      "type": "object",
+      "properties": {
+        "caseId": { "type": "string", "description": "Unique case document identifier" },
+        "batchId": { "type": "string", "description": "Associated milk batch identifier" },
+        "assignedOfficerUid": { "type": "string", "description": "UID of assigned Food Safety Officer" },
+        "sharedWithUids": { "type": "array", "items": { "type": "string" }, "description": "UIDs of officers with shared access" },
+        "facilityId": { "type": "string", "description": "Originating or focal facility identifier" },
+        "facilityName": { "type": "string", "description": "Human-readable facility name" },
+        "primaryAnomaly": { "type": "string", "description": "Non-diagnostic anomaly description" },
+        "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "description": "Severity level" },
+        "evidenceConfidence": { "type": "number", "description": "Confidence score from 0.0 to 1.0" },
+        "recommendedAction": { "type": "string", "description": "Recommended field action" },
+        "investigationBrief": { "type": "string", "description": "Executive summary brief text" },
+        "status": { "type": "string", "enum": ["OPEN", "UNDER_REVIEW", "INSPECTION_REQUIRED", "RESOLVED"], "description": "Case workflow state" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time", "description": "Timestamp when case was resolved" }
+      },
+      "required": ["caseId", "batchId", "assignedOfficerUid", "facilityId", "primaryAnomaly", "severity", "evidenceConfidence", "recommendedAction", "investigationBrief", "status", "createdAt", "updatedAt"]
+    },
+    "OfficerNote": {
+      "title": "OfficerNote",
+      "description": "Timestamped investigation note recorded by an authorized officer.",
+      "type": "object",
+      "properties": {
+        "noteId": { "type": "string", "description": "Unique note identifier" },
+        "caseId": { "type": "string", "description": "Associated case identifier" },
+        "officerUid": { "type": "string", "description": "Firebase UID of authoring officer" },
+        "content": { "type": "string", "description": "Note content text" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["noteId", "caseId", "officerUid", "content", "createdAt"]
+    },
+    "ChatSummary": {
+      "title": "ChatSummary",
+      "description": "Concise summary of investigation conversation and agent findings.",
+      "type": "object",
+      "properties": {
+        "caseId": { "type": "string", "description": "Associated case identifier" },
+        "summary": { "type": "string", "description": "Distilled conversation and reasoning summary" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["caseId", "summary", "updatedAt"]
+    },
+    "Alert": {
+      "title": "Alert",
+      "description": "Persisted supply-chain anomaly application alert.",
+      "type": "object",
+      "properties": {
+        "alertId": { "type": "string", "description": "Unique alert identifier" },
+        "batchId": { "type": "string", "description": "Associated batch code" },
+        "anomalyId": { "type": "string", "description": "Deterministic anomaly identifier" },
+        "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "description": "Severity level" },
+        "facilityId": { "type": "string", "description": "Associated facility ID" },
+        "status": { "type": "string", "enum": ["NEW", "ACKNOWLEDGED", "INVESTIGATING", "RESOLVED"], "description": "Alert status" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["alertId", "batchId", "anomalyId", "severity", "facilityId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile with role-based access designation"
+    },
+    "/cases/{caseId}": {
+      "schema": "Case",
+      "description": "Investigation cases for supply chain anomalies"
+    },
+    "/officer_notes/{noteId}": {
+      "schema": "OfficerNote",
+      "description": "Officer observation notes linked to cases"
+    },
+    "/chat_summaries/{caseId}": {
+      "schema": "ChatSummary",
+      "description": "Investigation conversation summaries per case"
+    },
+    "/alerts/{alertId}": {
+      "schema": "Alert",
+      "description": "Application alerts persisted from detected supply-chain anomalies"
+    }
+  }
+}

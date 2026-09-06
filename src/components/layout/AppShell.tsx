@@ -17,7 +17,8 @@ import {
   ExternalLink,
   ShieldAlert,
   BadgeCheck,
-  Shield
+  Shield,
+  Bot
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -36,17 +37,13 @@ export const AppShell: React.FC<AppShellProps> = () => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     const query = searchQuery.trim().toUpperCase();
-    if (query.startsWith('BATCH') || query.startsWith('MW-')) {
-      navigate(`/app/batches?search=${encodeURIComponent(query)}`);
-    } else if (query.startsWith('CASE') || query.startsWith('INV')) {
-      navigate(`/app/investigations?search=${encodeURIComponent(query)}`);
-    } else {
-      navigate(`/app/batches?search=${encodeURIComponent(query)}`);
-    }
+    navigate(`/app/search?q=${encodeURIComponent(query)}`);
   };
 
   const navItems = [
     { name: 'Dashboard', path: '/app/dashboard', icon: LayoutDashboard },
+    { name: 'Batch Search', path: '/app/search', icon: Search },
+    { name: 'AI Agent', path: '/app/agent', icon: Bot, badge: 'ADK' },
     { name: 'Batches', path: '/app/batches', icon: Layers },
     { name: 'Alerts', path: '/app/alerts', icon: AlertTriangle, badge: '2' },
     { name: 'Investigations', path: '/app/investigations', icon: FileSearch, badge: '4' },
@@ -59,6 +56,8 @@ export const AppShell: React.FC<AppShellProps> = () => {
   const currentPath = location.pathname;
   let sectionLabel = 'Console';
   if (currentPath.includes('/dashboard')) sectionLabel = 'Investigation Priority Dashboard';
+  else if (currentPath.includes('/search')) sectionLabel = 'Batch Search & Dossier Inspection';
+  else if (currentPath.includes('/agent')) sectionLabel = 'Autonomous Investigation Agent (ADK & Gemini)';
   else if (currentPath.includes('/batches')) sectionLabel = 'Supply-Chain Batch Ledger';
   else if (currentPath.includes('/alerts')) sectionLabel = 'Active Anomaly Alerts';
   else if (currentPath.includes('/investigations')) sectionLabel = 'Case Dossiers & Evidence';

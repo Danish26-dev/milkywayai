@@ -10,8 +10,11 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/server/anomalyEngine.test.ts",
-    "test:anomalies": "tsx src/server/anomalyEngine.test.ts"
+    "test": "tsx src/server/anomalyEngine.test.ts && tsx src/server/mcp/mcpServer.test.ts && tsx src/server/agent/investigationAgent.test.ts",
+    "test:anomalies": "tsx src/server/anomalyEngine.test.ts",
+    "test:mcp": "tsx src/server/mcp/mcpServer.test.ts",
+    "test:agent": "tsx src/server/agent/investigationAgent.test.ts",
+    "start:mcp": "tsx src/server/mcp/mcpServer.ts"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^9.0.3",

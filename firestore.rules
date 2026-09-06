@@ -29,9 +29,8 @@ service cloud.firestore {
       return hasRole('OFFICER') || hasRole('officer') || isAdmin();
     }
 
-    // users/{uid} collection
-    // User can read their own profile; Admin can read all; Users can update their own lastLoginAt or basic profile
-    // Role field can ONLY be modified by Admins
+    // 1. users collection
+    // User can read their own profile; Admin can read all; Role field can ONLY be modified by Admins
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId);
@@ -39,48 +38,61 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Officer private application data & dossiers
-    // An officer cannot access another officer's private case data unless assigned or an Admin
+    // 2. cases/{caseId}
+    // An officer may access:
+    // - Their assigned cases (assignedOfficerUid == request.auth.uid)
+    // - Cases explicitly shared with them (sharedWithUids contains request.auth.uid)
+    // An admin may access according to admin policy.
+    // Never trust frontend-supplied officerUid; authenticated UID is enforced.
     match /cases/{caseId} {
       allow read: if isOfficer() && (
-        resource.data.assignedOfficerId == request.auth.uid ||
-        resource.data.assignedOfficerBadge == getUserData().badgeNumber ||
+        resource.data.assignedOfficerUid == request.auth.uid ||
+        (resource.data.sharedWithUids != null && request.auth.uid in resource.data.sharedWithUids) ||
         isAdmin()
       );
-      allow create: if isOfficer();
+      allow create: if isOfficer() && (
+        request.resource.data.assignedOfficerUid == request.auth.uid ||
+        isAdmin()
+      );
       allow update: if isOfficer() && (
-        resource.data.assignedOfficerId == request.auth.uid ||
+        resource.data.assignedOfficerUid == request.auth.uid ||
+        (resource.data.sharedWithUids != null && request.auth.uid in resource.data.sharedWithUids) ||
         isAdmin()
       );
       allow delete: if isAdmin();
 
-      // Append-only officer notes subcollection
+      // Legacy subcollection support for backwards compatibility
       match /notes/{noteId} {
         allow read: if isOfficer();
-        allow create: if isOfficer() && request.resource.data.authorId == request.auth.uid;
-        allow update, delete: if false; // Append-only integrity: notes cannot be mutated or deleted
+        allow create: if isOfficer() && request.resource.data.officerId == request.auth.uid;
+        allow update, delete: if false;
       }
     }
 
-    // Supply-chain batches and facilities (read-only for authenticated officers and admins)
-    match /batches/{batchId} {
+    // 3. officer_notes/{noteId}
+    // Top-level collection storing: noteId, caseId, officerUid, content, createdAt
+    match /officer_notes/{noteId} {
       allow read: if isOfficer();
-      allow write: if isAdmin();
+      allow create: if isOfficer() && request.resource.data.officerUid == request.auth.uid;
+      allow update: if isOfficer() && resource.data.officerUid == request.auth.uid;
+      allow delete: if isAdmin();
     }
 
-    match /facilities/{facilityId} {
-      allow read: if isOfficer();
-      allow write: if isAdmin();
-    }
-
-    match /vehicles/{vehicleId} {
-      allow read: if isOfficer();
-      allow write: if isAdmin();
-    }
-
-    match /alerts/{alertId} {
+    // 4. chat_summaries/{caseId}
+    // Stores concise investigation conversation summaries rather than raw token floods
+    match /chat_summaries/{caseId} {
       allow read: if isOfficer();
       allow write: if isOfficer();
+    }
+
+    // 5. alerts/{alertId}
+    // Persists detected anomalies as application alerts:
+    // alertId, batchId, anomalyId, severity, facilityId, status, createdAt
+    match /alerts/{alertId} {
+      allow read: if isOfficer();
+      allow create: if isOfficer();
+      allow update: if isOfficer();
+      allow delete: if isAdmin();
     }
   }
 }

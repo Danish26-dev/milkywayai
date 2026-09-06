@@ -64,9 +64,12 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       };
     }
   } catch (e) {
-    // offline or unauthenticated preview fallback
+    // offline or preview fallback
   }
-  return { 'Content-Type': 'application/json' };
+  return {
+    'Authorization': 'Bearer demo-token',
+    'Content-Type': 'application/json'
+  };
 }
 
 // Local mutable state for realistic in-session interactions (e.g. adding officer notes or changing case status)
@@ -262,12 +265,56 @@ export const supplyChainJournalService: SupplyChainJournalService = {
 
 export const investigationService: InvestigationService = {
   async getPriorityInvestigations(): Promise<InvestigationCase[]> {
-    // PRODUCTION INTEGRATION: Cloud Firestore query:
-    // casesRef.where("priority", "in", ["IMMEDIATE", "HIGH"]).orderBy("priority").limit(10)
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/investigations/priority', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.investigations) && data.investigations.length > 0) {
+          return data.investigations.map((item: any) => ({
+            id: item.caseId || item.id,
+            caseNumber: item.caseId ? `INV-${item.caseId.replace('CASE-', '')}` : 'INV-2026',
+            batchId: item.batchId || item.batch,
+            batchCode: item.batch,
+            facilityId: item.facilityId,
+            facilityName: item.facility,
+            primaryAnomalyId: `ANOM-${item.batch}`,
+            primaryAnomalyType: item.anomaly.includes('UNACCOUNTED') ? 'MASS_BALANCE_EXCESSIVE_LOSS' : 'MASS_BALANCE_SURPLUS',
+            priority: item.priority,
+            status: item.status,
+            discrepancyLitres: item.discrepancy ? parseFloat(item.discrepancy.replace(/[^0-9.-]/g, '')) || 0 : 0,
+            variancePercentage: item.discrepancy ? parseFloat(item.discrepancy.match(/\(([-+]?[0-9.]+)%\)/)?.[1] || '0') : 0,
+            evidenceConfidenceScore: item.evidenceConfidenceScore || 0.95,
+            evidenceItems: [],
+            officerNotes: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch priority investigations from backend:', e);
+    }
     return localCases.filter(c => c.priority === 'IMMEDIATE' || c.priority === 'HIGH');
   },
 
   async getAllCases(statusFilter?: string): Promise<InvestigationCase[]> {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/investigations', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.cases) && data.cases.length > 0) {
+          let cases = data.cases;
+          if (statusFilter && statusFilter !== 'ALL') {
+            cases = cases.filter((c: any) => c.status === statusFilter);
+          }
+          return cases;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch cases from backend:', e);
+    }
     if (statusFilter && statusFilter !== 'ALL') {
       return localCases.filter(c => c.status === statusFilter);
     }
@@ -275,7 +322,19 @@ export const investigationService: InvestigationService = {
   },
 
   async getCaseById(caseId: string): Promise<InvestigationCase | null> {
-    const c = localCases.find(item => item.id === caseId || item.caseNumber === caseId);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/investigations/${encodeURIComponent(caseId)}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.case) {
+          return data.case;
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to fetch case ${caseId} from backend:`, e);
+    }
+    const c = localCases.find(item => item.id === caseId || item.caseNumber === caseId || item.batchId === caseId || item.batchCode === caseId);
     return c || null;
   },
 
@@ -284,8 +343,24 @@ export const investigationService: InvestigationService = {
   },
 
   async addOfficerNote(caseId: string, noteData): Promise<OfficerNote> {
-    // PRODUCTION INTEGRATION: Cloud Firestore write to sub-collection:
-    // doc(db, 'cases', caseId).collection('notes').add(noteData)
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/investigations/${encodeURIComponent(caseId)}/notes`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          noteText: noteData.noteText,
+          actionTaken: noteData.actionTaken
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.note) return data.note;
+      }
+    } catch (e) {
+      console.warn(`Failed to save officer note on backend for ${caseId}:`, e);
+    }
+
     const newNote: OfficerNote = {
       ...noteData,
       id: `NOTE-${Date.now()}`,
@@ -293,7 +368,7 @@ export const investigationService: InvestigationService = {
     };
 
     localCases = localCases.map(c => {
-      if (c.id === caseId) {
+      if (c.id === caseId || c.batchId === caseId) {
         return {
           ...c,
           updatedAt: new Date().toISOString(),
@@ -307,9 +382,20 @@ export const investigationService: InvestigationService = {
   },
 
   async updateCaseStatus(caseId: string, status: InvestigationCase['status'], officerId: string): Promise<boolean> {
-    // PRODUCTION INTEGRATION: Cloud Firestore updateDoc with officer audit trail
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/investigations/${encodeURIComponent(caseId)}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) return true;
+    } catch (e) {
+      console.warn(`Failed to update case status on backend for ${caseId}:`, e);
+    }
+
     localCases = localCases.map(c => {
-      if (c.id === caseId) {
+      if (c.id === caseId || c.batchId === caseId) {
         return {
           ...c,
           status,

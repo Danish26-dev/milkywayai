@@ -127,6 +127,13 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
       initial_quantity_litres: 1000.0,
       created_at: '2026-09-05T06:00:00.000Z',
       status: 'FLAGGED_DISCREPANCY'
+    },
+    {
+      batch_id: 'MW-10482',
+      origin_facility_id: 'FAC-ANAND-01',
+      initial_quantity_litres: 1000.0,
+      created_at: '2026-09-05T06:00:00.000Z',
+      status: 'FLAGGED_DISCREPANCY'
     }
   ];
 
@@ -481,6 +488,125 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
         mass_balance_flagged: true
       }),
       created_at: '2026-09-05T13:30:45.000Z'
+    },
+    // --- BATCH MW-10482: Identical verified anomaly records for direct prompt resolution ---
+    {
+      event_id: 'EVT-MW-01',
+      batch_id: 'MW-10482',
+      event_type: 'MILK_COLLECTED',
+      actor_id: 'ACT-OPERATOR-ANAND-01',
+      facility_id: 'FAC-ANAND-01',
+      vehicle_id: null,
+      quantity_litres: 1000.0,
+      timestamp: '2026-09-05T06:15:00.000Z',
+      latitude: 22.5645,
+      longitude: 72.9289,
+      metadata: JSON.stringify({
+        batch_description: 'Consolidated intake vat #3',
+        initial_input_litres: 1000.0,
+        temperature_celsius: 4.3,
+        fat_pct: 4.2,
+        snf_pct: 8.6,
+        seal_id: 'SEAL-AN-99411'
+      }),
+      created_at: '2026-09-05T06:15:10.000Z'
+    },
+    {
+      event_id: 'EVT-MW-02',
+      batch_id: 'MW-10482',
+      event_type: 'TRANSFERRED',
+      actor_id: 'ACT-DRIVER-DESAI-14',
+      facility_id: 'FAC-ANAND-01',
+      vehicle_id: 'VEH-GJ23-T9904',
+      quantity_litres: 995.0,
+      timestamp: '2026-09-05T07:00:00.000Z',
+      latitude: 22.5645,
+      longitude: 72.9289,
+      metadata: JSON.stringify({
+        flow_meter_id: 'FM-AN-PUMP-03',
+        tanker_id: 'VEH-GJ23-T9904',
+        temperature_celsius: 4.4
+      }),
+      created_at: '2026-09-05T07:00:25.000Z'
+    },
+    {
+      event_id: 'EVT-MW-03',
+      batch_id: 'MW-10482',
+      event_type: 'STORED',
+      actor_id: 'ACT-CHILLING-TECH-04',
+      facility_id: 'FAC-KAIRA-02',
+      vehicle_id: 'VEH-GJ23-T9904',
+      quantity_litres: 995.0,
+      timestamp: '2026-09-05T08:15:00.000Z',
+      latitude: 22.7533,
+      longitude: 72.6822,
+      metadata: JSON.stringify({
+        vat_id: 'VAT-SILO-05',
+        temperature_celsius: 3.9
+      }),
+      created_at: '2026-09-05T08:15:30.000Z'
+    },
+    {
+      event_id: 'EVT-MW-04',
+      batch_id: 'MW-10482',
+      event_type: 'PROCESSED',
+      actor_id: 'ACT-PLANT-OPERATOR-AMUL-03',
+      facility_id: 'FAC-AMUL-03',
+      vehicle_id: null,
+      quantity_litres: 980.0,
+      timestamp: '2026-09-05T10:30:00.000Z',
+      latitude: 23.2156,
+      longitude: 72.6369,
+      metadata: JSON.stringify({
+        process_step: 'Pasteurization Intake & Processing',
+        pasteurizer_unit: 'PAST-MEGA-UNIT-01',
+        inflow_litres: 995.0,
+        expected_output_litres: 980.0,
+        registered_processing_tolerance_pct: 2.0
+      }),
+      created_at: '2026-09-05T10:30:15.000Z'
+    },
+    {
+      event_id: 'EVT-MW-05',
+      batch_id: 'MW-10482',
+      event_type: 'DISPATCHED',
+      actor_id: 'ACT-DISPATCH-SUPERVISOR-09',
+      facility_id: 'FAC-AMUL-03',
+      vehicle_id: 'VEH-GJ23-T9904',
+      quantity_litres: 650.0,
+      timestamp: '2026-09-05T11:45:00.000Z',
+      latitude: 23.2156,
+      longitude: 72.6369,
+      metadata: JSON.stringify({
+        flowmeter_id: 'FM-DISP-PACK-04',
+        observed_quantity_litres: 650.0,
+        expected_quantity_litres: 980.0,
+        unaccounted_discrepancy_litres: 330.0,
+        discrepancy_percentage: -33.67,
+        anomaly_flag: 'FLAG_MASS_BALANCE_EXCESSIVE_LOSS',
+        destination_facility: 'FAC-AHMD-04',
+        tanker_seal_no: 'SEAL-DISP-8802'
+      }),
+      created_at: '2026-09-05T11:45:30.000Z'
+    },
+    {
+      event_id: 'EVT-MW-06',
+      batch_id: 'MW-10482',
+      event_type: 'RECEIVED',
+      actor_id: 'ACT-DEPOT-RECEIVER-AHMD-01',
+      facility_id: 'FAC-AHMD-04',
+      vehicle_id: 'VEH-GJ23-T9904',
+      quantity_litres: 645.0,
+      timestamp: '2026-09-05T13:30:00.000Z',
+      latitude: 23.0225,
+      longitude: 72.5714,
+      metadata: JSON.stringify({
+        intake_tank: 'SILO-AHMD-QUARANTINE-03',
+        status_note: 'Quarantine silo assignment triggered by upstream volume discrepancy flag',
+        temperature_celsius: 4.2,
+        mass_balance_flagged: true
+      }),
+      created_at: '2026-09-05T13:30:45.000Z'
     }
   ];
 
@@ -495,6 +621,18 @@ export function generateDeterministicSeed(): BigQuerySeedDataset {
       expected_value: 980.0,
       difference_value: -330.0,
       evidence: 'Deterministic mass-balance computation detected 330.0 L unexplained volume shortfall between expected processing output (980.0 L) and recorded dispatch (650.0 L, -33.67% variance). Standard process tolerance threshold is ±2.0%. Root cause requires physical inspection and facility log audit to verify.',
+      detected_at: '2026-09-05T11:45:30.000Z',
+      status: 'OPEN_INVESTIGATION'
+    },
+    {
+      anomaly_id: 'ANOM-MW-10482-MB',
+      batch_id: 'MW-10482',
+      anomaly_type: 'MASS_BALANCE_EXCESSIVE_LOSS',
+      severity: 'CRITICAL',
+      observed_value: 650.0,
+      expected_value: 980.0,
+      difference_value: -330.0,
+      evidence: 'Deterministic mass-balance computation detected 330.0 L unexplained volume shortfall between expected processing output (980.0 L) and recorded dispatch (650.0 L, -33.67% variance). Standard process tolerance threshold is ±2.0%. Physical inspection and laboratory testing are required to determine whether adulteration or another food-safety issue occurred.',
       detected_at: '2026-09-05T11:45:30.000Z',
       status: 'OPEN_INVESTIGATION'
     }

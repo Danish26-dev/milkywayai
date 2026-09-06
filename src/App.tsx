@@ -25,6 +25,8 @@ import { FacilitiesPage } from './pages/app/FacilitiesPage';
 import { VehiclesPage } from './pages/app/VehiclesPage';
 import { ProfilePage } from './pages/app/ProfilePage';
 import { AdminPage } from './pages/app/AdminPage';
+import { InvestigationAgentPage } from './pages/app/InvestigationAgentPage';
+import { BatchSearchPage } from './pages/app/BatchSearchPage';
 
 export default function App() {
   return (
@@ -48,10 +50,12 @@ export default function App() {
           >
             <Route index element={<Navigate to="/app/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="search" element={<BatchSearchPage />} />
             <Route path="batches" element={<BatchesPage />} />
             <Route path="batches/:batchId" element={<BatchDetailPage />} />
             <Route path="investigations" element={<InvestigationsPage />} />
             <Route path="investigations/:caseId" element={<InvestigationDetailPage />} />
+            <Route path="agent" element={<InvestigationAgentPage />} />
             <Route path="alerts" element={<AlertsPage />} />
             <Route path="facilities" element={<FacilitiesPage />} />
             <Route path="vehicles" element={<VehiclesPage />} />

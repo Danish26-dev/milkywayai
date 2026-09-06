@@ -181,6 +181,10 @@ export interface Batch {
 }
 
 export type InvestigationCaseStatus = 
+  | 'OPEN'
+  | 'UNDER_REVIEW'
+  | 'INSPECTION_REQUIRED'
+  | 'RESOLVED'
   | 'QUEUED' 
   | 'ASSIGNED' 
   | 'ACTIVE_ANALYSIS' 

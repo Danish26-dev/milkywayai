@@ -16,7 +16,8 @@ import {
   ShieldCheck,
   TrendingDown,
   TrendingUp,
-  UserCheck
+  UserCheck,
+  ChevronRight
 } from 'lucide-react';
 import {
   investigationService,
@@ -160,12 +161,13 @@ export const DashboardPage: React.FC = () => {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-[#F4F1E8]/60 border-b border-[#202521]/10 font-mono text-[11px] text-[#202521]/80">
-                <th className="py-3 px-4 font-semibold">Batch ID</th>
+                <th className="py-3 px-4 font-semibold">Priority</th>
+                <th className="py-3 px-4 font-semibold">Batch</th>
                 <th className="py-3 px-4 font-semibold">Facility</th>
                 <th className="py-3 px-4 font-semibold">Anomaly</th>
-                <th className="py-3 px-4 font-semibold text-right">Quantity Discrepancy</th>
+                <th className="py-3 px-4 font-semibold text-right">Discrepancy</th>
                 <th className="py-3 px-4 font-semibold text-center">Evidence Confidence</th>
-                <th className="py-3 px-4 font-semibold text-center">Inspection Priority</th>
+                <th className="py-3 px-4 font-semibold text-center">Status</th>
                 <th className="py-3 px-4 font-semibold text-right">Action</th>
               </tr>
             </thead>
@@ -174,7 +176,20 @@ export const DashboardPage: React.FC = () => {
                 const isSurplus = c.discrepancyLitres > 0;
                 return (
                   <tr key={c.id} className="hover:bg-[#F4F1E8]/40 transition-colors">
-                    {/* Batch ID */}
+                    {/* 1. Priority */}
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-block px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase tracking-wider ${
+                          c.priority === 'IMMEDIATE'
+                            ? 'bg-[#9E4939] text-[#FFFDF7]'
+                            : 'bg-[#B78632] text-[#FFFDF7]'
+                        }`}
+                      >
+                        {c.priority}
+                      </span>
+                    </td>
+
+                    {/* 2. Batch */}
                     <td className="py-3 px-4 font-mono font-bold text-[#26352D]">
                       <Link
                         to={`/app/batches/${c.batchId}`}
@@ -185,26 +200,26 @@ export const DashboardPage: React.FC = () => {
                       </Link>
                     </td>
 
-                    {/* Facility */}
+                    {/* 3. Facility */}
                     <td className="py-3 px-4">
                       <div className="font-semibold text-[#202521]">{c.facilityName}</div>
                       <div className="text-[10px] font-mono text-[#202521]/60">{c.facilityId}</div>
                     </td>
 
-                    {/* Anomaly */}
+                    {/* 4. Anomaly */}
                     <td className="py-3 px-4 max-w-xs">
                       <span className="font-medium text-[#202521] block">
-                        {c.primaryAnomalyType === 'MASS_BALANCE_SURPLUS' && 'Mass Balance Surplus (Unmetered Gain)'}
-                        {c.primaryAnomalyType === 'VELOCITY_IMPOSSIBILITY' && 'Velocity Impossibility (175.7 km/h)'}
-                        {c.primaryAnomalyType === 'MASS_BALANCE_EXCESSIVE_LOSS' && 'Excessive Process Shrinkage'}
-                        {c.primaryAnomalyType === 'TEMPERATURE_EXCURSION' && 'Prolonged Thermal Excursion'}
+                        {c.primaryAnomalyType === 'MASS_BALANCE_SURPLUS' && 'UNACCOUNTED QUANTITY (+1,200 L Surplus)'}
+                        {c.primaryAnomalyType === 'VELOCITY_IMPOSSIBILITY' && 'IMPLAUSIBLE MOVEMENT (175.7 km/h)'}
+                        {c.primaryAnomalyType === 'MASS_BALANCE_EXCESSIVE_LOSS' && 'SUPPLY-CHAIN ANOMALY (Excessive Shrinkage)'}
+                        {c.primaryAnomalyType === 'TEMPERATURE_EXCURSION' && 'INVESTIGATION SIGNAL (Thermal Excursion)'}
                       </span>
                       <span className="text-[10px] font-mono text-[#202521]/65 line-clamp-1">
                         Case {c.caseNumber}
                       </span>
                     </td>
 
-                    {/* Quantity Discrepancy */}
+                    {/* 5. Discrepancy */}
                     <td className="py-3 px-4 font-mono text-right">
                       {c.discrepancyLitres !== 0 ? (
                         <div className="flex items-center justify-end gap-1 font-bold">
@@ -218,7 +233,7 @@ export const DashboardPage: React.FC = () => {
                           </span>
                         </div>
                       ) : (
-                        <span className="text-[#202521]/60 font-mono">0 L (Transit anomaly)</span>
+                        <span className="text-[#202521]/60 font-mono">0 L (Transit velocity divergence)</span>
                       )}
                       {c.variancePercentage !== 0 && (
                         <span className="text-[10px] text-[#202521]/60 font-mono block">
@@ -227,28 +242,27 @@ export const DashboardPage: React.FC = () => {
                       )}
                     </td>
 
-                    {/* Evidence Confidence */}
+                    {/* 6. Evidence Confidence */}
                     <td className="py-3 px-4 text-center">
                       <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[11px] font-bold bg-[#66734A]/10 text-[#66734A]">
-                        <span>98%</span>
+                        <span>{Math.round((c.evidenceConfidenceScore || 0.98) * 100)}%</span>
                         <span className="text-[9px] text-[#202521]/50 font-normal">Immutable</span>
                       </div>
                     </td>
 
-                    {/* Inspection Priority */}
+                    {/* 7. Status */}
                     <td className="py-3 px-4 text-center">
-                      <span
-                        className={`inline-block px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase tracking-wider ${
-                          c.priority === 'IMMEDIATE'
-                            ? 'bg-[#9E4939] text-[#FFFDF7]'
-                            : 'bg-[#B78632] text-[#FFFDF7]'
-                        }`}
-                      >
-                        {c.priority}
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider ${
+                        c.status === 'OPEN' || c.status === 'QUEUED' ? 'bg-[#2E4057]/15 text-[#2E4057]' :
+                        c.status === 'UNDER_REVIEW' || c.status === 'ACTIVE_ANALYSIS' ? 'bg-[#B78632]/15 text-[#B78632]' :
+                        c.status === 'INSPECTION_REQUIRED' || c.status === 'ESCALATED_TO_INSPECTION' ? 'bg-[#9E4939]/15 text-[#9E4939]' :
+                        'bg-[#66734A]/15 text-[#66734A]'
+                      }`}>
+                        {c.status.replace(/_/g, ' ')}
                       </span>
                     </td>
 
-                    {/* Action */}
+                    {/* 8. Action */}
                     <td className="py-3 px-4 text-right">
                       <Link
                         to={`/app/investigations/${c.id}`}
@@ -552,11 +566,3 @@ export const DashboardPage: React.FC = () => {
     </div>
   );
 };
-
-function ChevronRight({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}

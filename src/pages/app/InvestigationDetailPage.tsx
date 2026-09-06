@@ -15,11 +15,16 @@ import {
   Lock,
   Layers,
   FileText,
-  ListOrdered
+  ListOrdered,
+  Bot,
+  Sparkles,
+  Loader2,
+  Check
 } from 'lucide-react';
 import { investigationService } from '../../services';
 import { InvestigationCase, OfficerNote } from '../../types/models';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../lib/firebase';
 
 export const InvestigationDetailPage: React.FC = () => {
   const { caseId } = useParams<{ caseId: string }>();
@@ -31,6 +36,10 @@ export const InvestigationDetailPage: React.FC = () => {
   const [isSubmittingNote, setIsSubmittingNote] = useState<boolean>(false);
   const [escalateSuccess, setEscalateSuccess] = useState<boolean>(false);
 
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'assistant'; text: string; timestamp?: string }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSendingChat, setIsSendingChat] = useState(false);
+
   useEffect(() => {
     async function loadCase() {
       if (!caseId) return;
@@ -38,6 +47,13 @@ export const InvestigationDetailPage: React.FC = () => {
       try {
         const c = await investigationService.getCaseById(caseId);
         setCaseData(c);
+        if (c && (c as any).chatHistory) {
+          setChatMessages((c as any).chatHistory.map((m: any) => ({
+            sender: m.role || m.sender,
+            text: m.content || m.text,
+            timestamp: m.timestamp
+          })));
+        }
       } catch (err) {
         console.error('Failed to load investigation case:', err);
       } finally {
@@ -46,6 +62,73 @@ export const InvestigationDetailPage: React.FC = () => {
     }
     loadCase();
   }, [caseId]);
+
+  const handleStatusChange = async (newStatus: InvestigationCase['status']) => {
+    if (!caseData) return;
+    try {
+      await investigationService.updateCaseStatus(
+        caseData.id,
+        newStatus,
+        officer?.id || 'off-delhi-042'
+      );
+      setCaseData(prev => prev ? { ...prev, status: newStatus } : null);
+    } catch (err) {
+      console.error('Failed to update case status:', err);
+    }
+  };
+
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!caseData || !chatInput.trim() || isSendingChat) return;
+
+    const userText = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { sender: 'user', text: userText, timestamp: new Date().toISOString() }]);
+    setIsSendingChat(true);
+
+    try {
+      let token = 'demo-token';
+      try {
+        const u = auth.currentUser;
+        if (u) token = await u.getIdToken();
+      } catch (e) {}
+
+      const res = await fetch(`/api/investigations/${encodeURIComponent(caseData.id)}/chat`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: userText })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.message) {
+          setChatMessages(prev => [...prev, {
+            sender: 'assistant',
+            text: data.message.content || data.message.text,
+            timestamp: data.message.timestamp || new Date().toISOString()
+          }]);
+        }
+      } else {
+        setChatMessages(prev => [...prev, {
+          sender: 'assistant',
+          text: 'The autonomous investigation agent is currently engaged in another task. Please retry shortly.',
+          timestamp: new Date().toISOString()
+        }]);
+      }
+    } catch (err) {
+      console.error('Chat error:', err);
+      setChatMessages(prev => [...prev, {
+        sender: 'assistant',
+        text: 'Connection to investigation agent interrupted.',
+        timestamp: new Date().toISOString()
+      }]);
+    } finally {
+      setIsSendingChat(false);
+    }
+  };
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,13 +242,28 @@ export const InvestigationDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono uppercase text-[#202521]/60">Status:</span>
+              <select
+                value={caseData.status}
+                onChange={(e) => handleStatusChange(e.target.value as any)}
+                className="px-2.5 py-1.5 rounded-lg bg-[#F4F1E8] border border-[#202521]/20 text-xs font-mono font-bold text-[#202521]"
+              >
+                <option value="OPEN">OPEN</option>
+                <option value="UNDER_REVIEW">UNDER REVIEW</option>
+                <option value="INSPECTION_REQUIRED">INSPECTION REQUIRED</option>
+                <option value="ESCALATED_TO_INSPECTION">ESCALATED TO INSPECTION</option>
+                <option value="RESOLVED">RESOLVED</option>
+              </select>
+            </div>
+
             {caseData.status !== 'ESCALATED_TO_INSPECTION' && (
               <button
                 onClick={handleEscalateInspection}
-                className="px-4 py-2 bg-[#9E4939] hover:bg-[#853c2e] text-[#FFFDF7] text-xs font-bold font-mono rounded-lg transition-colors cursor-pointer shadow-xs"
+                className="px-3.5 py-1.5 bg-[#9E4939] hover:bg-[#853c2e] text-[#FFFDF7] text-xs font-bold font-mono rounded-lg transition-colors cursor-pointer shadow-xs"
               >
-                Escalate to Physical Inspection
+                Escalate Inspection
               </button>
             )}
             {escalateSuccess && (
@@ -182,79 +280,99 @@ export const InvestigationDetailPage: React.FC = () => {
         {/* Left Column: Brief & Hypotheses (8 cols) */}
         <div className="lg:col-span-8 space-y-6">
           {/* Investigation Brief */}
-          {caseData.brief ? (
-            <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 shadow-xs p-6">
-              <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#202521]/10">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-[#26352D]" />
-                  <h2 className="text-base font-bold text-[#202521] font-sans">
-                    Investigation Brief
-                  </h2>
+          {(() => {
+            const brief = (caseData as any).brief || (caseData as any).investigationBrief;
+            if (!brief) {
+              return (
+                <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 p-6 text-center text-xs font-mono text-[#202521]/60">
+                  Brief awaiting preliminary evidence review.
                 </div>
-                <span className="text-[10px] font-mono text-[#66734A] bg-[#66734A]/10 px-2 py-0.5 rounded font-bold">
-                  {caseData.brief.agentVersion}
-                </span>
-              </div>
+              );
+            }
 
-              <p className="text-xs sm:text-sm text-[#202521]/90 leading-relaxed font-normal">
-                {caseData.brief.summary}
-              </p>
+            const summary = brief.summary;
+            const discrepancyAnalysis = brief.discrepancyAnalysis || brief.discrepancyDetails;
+            const hypotheses = brief.hypothesesForFieldInspector || (brief.evidenceCitations ? brief.evidenceCitations.map((c: string) => `Corroborated Tool Citation: ${c}`) : []);
+            const checklist = brief.recommendedInspectionFocus?.specificChecklist || brief.suggestedInspectionChecklist || [];
+            const recommendation = brief.recommendedInspectionFocus?.urgency || brief.inspectionRecommendation || 'Target weighbridge inspection';
 
-              <div className="mt-4 p-3.5 rounded-lg bg-[#F4F1E8]/60 border border-[#202521]/10 text-xs text-[#202521]/80">
-                <span className="font-bold text-[#26352D] block mb-1">
-                  Deterministic Discrepancy Analysis:
-                </span>
-                <p className="font-normal">{caseData.brief.discrepancyAnalysis}</p>
-              </div>
-
-              {/* Hypotheses for Field Inspector */}
-              <div className="mt-5">
-                <span className="text-xs font-bold font-sans text-[#202521] uppercase tracking-wider block mb-2">
-                  Hypotheses for Field Inspector:
-                </span>
-                <ul className="space-y-2 text-xs text-[#202521]/85">
-                  {caseData.brief.hypothesesForFieldInspector.map((hyp, i) => (
-                    <li key={i} className="flex items-start gap-2 bg-[#FFFDF7] p-2.5 rounded-lg border border-[#202521]/10">
-                      <span className="w-4 h-4 rounded-full bg-[#26352D] text-[#FFFDF7] text-[10px] font-mono flex items-center justify-center shrink-0 mt-0.5">
-                        {i + 1}
-                      </span>
-                      <span>{hyp}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Targeted Inspection Checklist */}
-              <div className="mt-5 pt-4 border-t border-[#202521]/10">
-                <div className="flex items-center gap-2 mb-2">
-                  <ListOrdered className="w-4 h-4 text-[#66734A]" />
-                  <span className="text-xs font-bold font-sans text-[#202521] uppercase tracking-wider">
-                    Recommended Inspection Focus ({caseData.brief.recommendedInspectionFocus.urgency}):
+            return (
+              <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 shadow-xs p-6">
+                <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#202521]/10">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-[#26352D]" />
+                    <h2 className="text-base font-bold text-[#202521] font-sans">
+                      Investigation Brief
+                    </h2>
+                  </div>
+                  <span className="text-[10px] font-mono text-[#66734A] bg-[#66734A]/10 px-2 py-0.5 rounded font-bold">
+                    {brief.agentVersion || brief.modelVersion || 'ADK-Investigation-Agent-v1'}
                   </span>
                 </div>
-                <div className="space-y-1.5 pl-6 text-xs text-[#202521]/85 list-disc font-normal">
-                  {caseData.brief.recommendedInspectionFocus.specificChecklist.map((check, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#66734A]" />
-                      <span>{check}</span>
+
+                <p className="text-xs sm:text-sm text-[#202521]/90 leading-relaxed font-normal">
+                  {summary}
+                </p>
+
+                {discrepancyAnalysis && (
+                  <div className="mt-4 p-3.5 rounded-lg bg-[#F4F1E8]/60 border border-[#202521]/10 text-xs text-[#202521]/80">
+                    <span className="font-bold text-[#26352D] block mb-1">
+                      Deterministic Discrepancy Analysis:
+                    </span>
+                    <p className="font-normal">{discrepancyAnalysis}</p>
+                  </div>
+                )}
+
+                {/* Hypotheses / Citations */}
+                {hypotheses && hypotheses.length > 0 && (
+                  <div className="mt-5">
+                    <span className="text-xs font-bold font-sans text-[#202521] uppercase tracking-wider block mb-2">
+                      Correlated Evidence & Hypotheses:
+                    </span>
+                    <ul className="space-y-2 text-xs text-[#202521]/85">
+                      {hypotheses.map((hyp: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 bg-[#FFFDF7] p-2.5 rounded-lg border border-[#202521]/10">
+                          <span className="w-4 h-4 rounded-full bg-[#26352D] text-[#FFFDF7] text-[10px] font-mono flex items-center justify-center shrink-0 mt-0.5">
+                            {i + 1}
+                          </span>
+                          <span>{hyp}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Targeted Inspection Checklist */}
+                {checklist && checklist.length > 0 && (
+                  <div className="mt-5 pt-4 border-t border-[#202521]/10">
+                    <div className="flex items-center gap-2 mb-2">
+                      <ListOrdered className="w-4 h-4 text-[#66734A]" />
+                      <span className="text-xs font-bold font-sans text-[#202521] uppercase tracking-wider">
+                        Recommended Inspection Focus ({recommendation}):
+                      </span>
                     </div>
-                  ))}
+                    <div className="space-y-1.5 pl-6 text-xs text-[#202521]/85 list-disc font-normal">
+                      {checklist.map((check: string, i: number) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#66734A]" />
+                          <span>{check}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Statutory Non-Diagnostic Disclaimer */}
+                <div className="mt-6 p-3 rounded-lg bg-[#202521] text-[#D8D3C7] text-[11px] font-mono leading-relaxed">
+                  <span className="text-[#B78632] font-bold block mb-0.5">
+                    STATUTORY NOTICE:
+                  </span>
+                  {brief.nonDiagnosticDisclaimer ||
+                    'MilkyWay detects unexplained supply-chain discrepancies and ranks investigation priority. It does NOT make food-safety or adulteration determinations. Adulteration requires laboratory testing and physical inspection.'}
                 </div>
               </div>
-
-              {/* Explicit Non-Diagnostic Disclaimer */}
-              <div className="mt-6 p-3 rounded-lg bg-[#202521] text-[#D8D3C7] text-[11px] font-mono leading-relaxed">
-                <span className="text-[#B78632] font-bold block mb-0.5">
-                  STATUTORY NOTICE:
-                </span>
-                {caseData.brief.nonDiagnosticDisclaimer}
-              </div>
-            </div>
-          ) : (
-            <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 p-6 text-center text-xs font-mono text-[#202521]/60">
-              Brief awaiting preliminary evidence review.
-            </div>
-          )}
+            );
+          })()}
 
           {/* Evidence Items Section */}
           <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 shadow-xs p-6">
@@ -373,6 +491,70 @@ export const InvestigationDetailPage: React.FC = () => {
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>{isSubmittingNote ? 'Appending...' : 'Append to Permanent Log'}</span>
+              </button>
+            </form>
+          </div>
+
+          {/* Contextual ADK Agent Chat */}
+          <div className="bg-[#FFFDF7] rounded-xl border border-[#202521]/15 shadow-xs p-6">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#202521]/10">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-[#26352D]" />
+                <h3 className="text-sm font-bold text-[#202521] font-sans">
+                  Investigator AI Dialogue
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono text-[#B78632] bg-[#B78632]/10 px-1.5 py-0.5 rounded font-bold">
+                ADK & GEMINI
+              </span>
+            </div>
+
+            <p className="text-[11px] text-[#202521]/70 mb-3">
+              Ask questions regarding this case's chain-of-custody, MCP tool findings, and inspection priorities.
+            </p>
+
+            <div className="space-y-2.5 max-h-64 overflow-y-auto mb-3 pr-1">
+              {chatMessages.length === 0 ? (
+                <div className="p-3 bg-[#F4F1E8]/50 rounded-lg text-center text-[11px] text-[#202521]/60 font-mono">
+                  No active dialogue. Ask a question like:
+                  <span className="block mt-1 text-[#26352D] font-bold">
+                    "What evidence supports the weighbridge variance?"
+                  </span>
+                </div>
+              ) : (
+                chatMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-2.5 rounded-lg text-xs leading-relaxed ${
+                      msg.sender === 'user'
+                        ? 'bg-[#26352D] text-[#FFFDF7] ml-4'
+                        : 'bg-[#F4F1E8] text-[#202521] border border-[#202521]/10 mr-4'
+                    }`}
+                  >
+                    <div className="text-[9px] font-mono opacity-70 mb-0.5">
+                      {msg.sender === 'user' ? 'Officer Question' : 'ADK Agent'}
+                    </div>
+                    <div>{msg.text}</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <form onSubmit={handleSendChat} className="flex gap-1.5">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ask about this case..."
+                className="flex-1 px-3 py-2 bg-[#F4F1E8] border border-[#202521]/20 rounded-lg text-xs focus:outline-hidden focus:border-[#26352D] text-[#202521]"
+                disabled={isSendingChat}
+              />
+              <button
+                type="submit"
+                disabled={isSendingChat || !chatInput.trim()}
+                className="px-3 py-2 bg-[#26352D] hover:bg-[#202521] text-[#FFFDF7] text-xs font-mono font-bold rounded-lg cursor-pointer disabled:opacity-50 flex items-center justify-center"
+              >
+                {isSendingChat ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
               </button>
             </form>
           </div>

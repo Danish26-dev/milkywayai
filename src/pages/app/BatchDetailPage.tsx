@@ -13,7 +13,8 @@ import {
   CheckCircle2,
   TrendingUp,
   TrendingDown,
-  Hash
+  Hash,
+  Bot
 } from 'lucide-react';
 import { supplyChainJournalService, investigationService } from '../../services';
 import { Batch, SupplyChainEvent, InvestigationCase } from '../../types/models';
@@ -116,15 +117,33 @@ export const BatchDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {associatedCase && (
+          <div className="flex items-center gap-2 flex-wrap">
             <Link
-              to={`/app/investigations/${associatedCase.id}`}
+              to={`/app/search?q=${encodeURIComponent(batch.batchCode || batch.id)}`}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#26352D] hover:bg-[#202521] text-[#FFFDF7] text-xs font-bold font-mono shadow-xs transition-colors shrink-0"
             >
-              <FileSearch className="w-4 h-4 text-[#66734A]" />
-              <span>Open Investigation Case ({associatedCase.caseNumber})</span>
+              <Bot className="w-4 h-4 text-[#E0C068]" />
+              <span>Investigate</span>
             </Link>
-          )}
+
+            <Link
+              to={`/app/agent?batch=${encodeURIComponent(batch.batchCode || batch.id)}`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2E4057] hover:bg-[#202521] text-[#FFFDF7] text-xs font-bold font-mono shadow-xs transition-colors shrink-0"
+            >
+              <Bot className="w-4 h-4 text-[#E0C068]" />
+              <span>Investigate with AI Agent</span>
+            </Link>
+
+            {associatedCase && (
+              <Link
+                to={`/app/investigations/${associatedCase.id}`}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#26352D] hover:bg-[#202521] text-[#FFFDF7] text-xs font-bold font-mono shadow-xs transition-colors shrink-0"
+              >
+                <FileSearch className="w-4 h-4 text-[#66734A]" />
+                <span>Open Investigation Case ({associatedCase.caseNumber})</span>
+              </Link>
+            )}
+          </div>
         </div>
       </div>
 
